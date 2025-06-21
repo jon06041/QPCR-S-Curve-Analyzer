@@ -1,0 +1,10 @@
+install_requires=[
+    "flask==3.1.1",
+    "flask-sqlalchemy==3.1.1",
+    "psycopg2-binary==2.9.7",
+    "numpy==1.24.3",
+    "scipy==1.10.1",
+    "matplotlib==3.7.1",
+    "scikit-learn==1.3.0",
+    "pandas==2.0.3",
+],
