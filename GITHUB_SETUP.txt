@@ -1,0 +1,54 @@
+qPCR S-Curve Analyzer - GitHub Setup Instructions
+======================================================
+
+IMPORTANT FILES TO INCLUDE:
+- app.py (main Flask application)
+- models.py (database models)
+- qpcr_analyzer.py (core analysis engine)  
+- index.html (web interface)
+- static/style.css (styling)
+- static/script.js (frontend functionality)
+- README.md (documentation)
+- deploy-requirements.txt (Python dependencies)
+- Procfile (Heroku deployment)
+- runtime.txt (Python version)
+- Dockerfile (container deployment)
+- docker-compose.yml (local development)
+- SHARING_GUIDE.md (testing instructions)
+- .gitignore (version control exclusions)
+
+GITHUB REPOSITORY SETUP:
+1. Go to github.com and create new repository "qpcr-analyzer"
+2. Make it Public (so testers can access)
+3. Add description: "qPCR S-Curve Analyzer - 30+ cycle support with database storage"
+
+UPLOAD METHOD (Web Interface):
+1. Click "uploading an existing file" on GitHub
+2. Drag and drop all the files listed above
+3. Commit with message: "Initial qPCR analyzer - 30+ cycle support"
+
+IMMEDIATE SHARING FOR TESTING:
+Current Replit URL: [Your current Replit share link]
+- Click Share button in Replit → Set to Unlisted → Copy link
+- Send to testers immediately while you work on GitHub
+
+DEPLOYMENT OPTIONS FOR TESTERS:
+1. Railway: Connect GitHub → Add PostgreSQL → Auto-deploy
+2. Render: Web Service from GitHub → Add database → Deploy
+3. Heroku: Connect repo → Add Postgres addon → Deploy
+
+TESTING INSTRUCTIONS FOR YOUR TEAM:
+"Please test this qPCR analyzer:
+1. Export CFX Manager data: Quantification tab → Export → All Data Sheets → CSV
+2. Upload to analyzer and click Analyze
+3. Verify green ✓ (good curves) vs red ✗ match expectations
+4. Test with 30-45 cycle runs and different plate sizes
+5. Report any issues or unexpected results"
+
+FEATURES READY FOR TESTING:
+- Supports 30+ PCR cycles (30, 35, 38, 40, 45+)
+- Database storage for team collaboration
+- Interactive S-curve visualization  
+- Analysis history and session management
+- Export results as CSV
+- Mobile-friendly interface
