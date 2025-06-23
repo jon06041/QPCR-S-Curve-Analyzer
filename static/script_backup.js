@@ -1,1 +1,0 @@
-// Backup of script.js before fixing syntax error
