@@ -352,9 +352,18 @@ function getRequiredChannels(testCode) {
 function validateChannelCompleteness(testCode, availableChannels) {
     const requiredChannels = getRequiredChannels(testCode);
     const missingChannels = requiredChannels.filter(channel => !availableChannels.includes(channel));
+    const isComplete = missingChannels.length === 0;
+    
+    console.log(`🔍 validateChannelCompleteness DEBUG - ${testCode}:`, {
+        requiredChannels,
+        availableChannels,
+        missingChannels,
+        isComplete,
+        completionRate: ((requiredChannels.length - missingChannels.length) / requiredChannels.length * 100).toFixed(1)
+    });
     
     return {
-        isComplete: missingChannels.length === 0,
+        isComplete,
         requiredChannels,
         availableChannels,
         missingChannels,
