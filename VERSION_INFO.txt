@@ -1,0 +1,26 @@
+qPCR S-Curve Analyzer - Production Version 2.0
+Created: 2025-06-27 02:28:38
+
+Version 2.0 Features:
+✓ Complete patient/control separation with correct percentage calculations
+✓ Universal pathogen control grid system for all test types
+✓ Fixed Analysis Summary counting consistency
+✓ Railway deployment configuration with railway.toml
+✓ Enhanced control validation with comprehensive criteria
+✓ Multi-fluorophore analysis with proper pathogen target mapping
+✓ Database storage with SQLite for development and PostgreSQL for production
+✓ Complete session history management and loading
+✓ Professional tabbed pathogen interface with real control data
+✓ Trend analysis with experiment statistics tracking
+
+Deployment Instructions:
+1. Upload files to GitHub repository
+2. Connect GitHub repository to Railway
+3. Railway will automatically detect railway.toml configuration
+4. Set environment variables if needed (DATABASE_URL will be auto-configured)
+5. Deploy and access via Railway-provided URL
+
+Key Formula Fix:
+- Percentage calculation: (total_pos - control_pos) / (total_wells - control_wells) * 100
+- Patient samples (368) and controls (16) properly separated
+- Control validation uses comprehensive criteria (amplitude ≥500 + good S-curve + no anomalies)
