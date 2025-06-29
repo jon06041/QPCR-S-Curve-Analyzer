@@ -719,10 +719,10 @@ def main():
 
         quality_filters = results['quality_filters']
         print(f'Start Cycle: {quality_filters["amplification_start_cycle"]}')
-        print(f'Min Amplitude: {quality_filters["min_amplitude"]}')
-        print(f'Min Plateau RFU: {quality_filters["min_plateau_rfu"]}')
-        print(f'Min SNR: {quality_filters["min_snr"]}')
-        print(f'Min Growth Rate: {quality_filters["min_growth_rate"]}')
+        print(f'Amplitude Check: {quality_filters["amplitude_check"]["amplitude"]:.1f}')
+        print(f'Plateau Level: {quality_filters["plateau_check"]["plateau_level"]:.1f}')
+        print(f'SNR: {quality_filters["snr_check"]["snr"]:.1f}')
+        print(f'Growth Rate: {quality_filters["growth_check"]["max_growth_rate"]:.1f}')
         print('-' * 50)
 
 if __name__ == "__main__":

@@ -630,6 +630,33 @@ async function performAnalysis() {
         console.log('🚨 FLUOROPHORE COUNT DEBUG - Total fluorophores:', fluorophores.length, 'List:', fluorophores);
         console.log('🚨 FLUOROPHORE COUNT DEBUG - allResults keys:', Object.keys(allResults));
         
+        // Extract test name and validate channel requirements
+        const firstFileName = Object.values(amplificationFiles)[0].fileName;
+        const basePattern = extractBasePattern(firstFileName);
+        const testName = extractTestName(basePattern);
+        console.log('🚨 CHANNEL VALIDATION - Test name:', testName, 'Base pattern:', basePattern);
+        
+        // Get required channels for this test from pathogen library
+        const pathogenMapping = getPathogenMappingForTest ? getPathogenMappingForTest(testName) : {};
+        const requiredChannels = Object.keys(pathogenMapping);
+        const uploadedChannels = fluorophores;
+        
+        console.log('🚨 CHANNEL VALIDATION - Required channels:', requiredChannels);
+        console.log('🚨 CHANNEL VALIDATION - Uploaded channels:', uploadedChannels);
+        
+        // Check if we have all required channels
+        if (requiredChannels.length > 0) {
+            const missingChannels = requiredChannels.filter(channel => !uploadedChannels.includes(channel));
+            if (missingChannels.length > 0) {
+                console.warn('🚨 INCOMPLETE CHANNELS - Missing channels:', missingChannels);
+                const completionRate = ((requiredChannels.length - missingChannels.length) / requiredChannels.length * 100).toFixed(0);
+                console.log(`Incomplete upload for ${testName} test (${completionRate}% complete). Missing: ${missingChannels.join(', ')}`);
+                // Continue processing - no popup
+            } else {
+                console.log('🚨 CHANNEL VALIDATION - All required channels present');
+            }
+        }
+        
         // If only one fluorophore was analyzed, save it properly to database
         if (fluorophores.length === 1) {
             console.log('🚨 SINGLE FLUOROPHORE PATH - Entering single fluorophore logic');
@@ -1026,14 +1053,20 @@ function propagateThresholdsToWells(individualResults) {
 async function saveCombinedSessionToDatabase(results, experimentPattern) {
     try {
         console.log('Saving combined multi-fluorophore session to database...');
-        // Defensive: deep copy results to avoid mutation by chart/annotation code
-        const resultsCopy = JSON.parse(JSON.stringify(results));
+        // Ensure threshold values are propagated before saving
+        propagateThresholdsToWells(results.individual_results);
+        
+        // Check if all required channels are present before saving session
+        const testName = extractTestName(experimentPattern);
+        const pathogenMapping = getPathogenMappingForTest ? getPathogenMappingForTest(testName) : {};
+        const requiredChannels = Object.keys(pathogenMapping);
+        
         // Get fluorophores from results
         const fluorophores = [];
-        console.log('[DEBUG] saveCombinedSessionToDatabase wellKeys:', Object.keys(resultsCopy.individual_results));
-        for (const wellKey in resultsCopy.individual_results) {
+        console.log('[DEBUG] saveCombinedSessionToDatabase wellKeys:', Object.keys(results.individual_results));
+        for (const wellKey in results.individual_results) {
             const fluorophore = extractFluorophoreFromWellId(wellKey);
-            const wellObj = resultsCopy.individual_results[wellKey];
+            const wellObj = results.individual_results[wellKey];
             console.log(`[DEBUG] WellKey: ${wellKey}, extracted fluor: ${fluorophore}, wellObj.fluorophore: ${wellObj && wellObj.fluorophore}`);
             if (fluorophore && !fluorophores.includes(fluorophore)) {
                 fluorophores.push(fluorophore);
@@ -1041,6 +1074,20 @@ async function saveCombinedSessionToDatabase(results, experimentPattern) {
                 fluorophores.push(wellObj.fluorophore);
             }
         }
+        
+        // Check if this is a complete session (all required channels present)
+        if (requiredChannels.length > 0) {
+            const missingChannels = requiredChannels.filter(channel => !fluorophores.includes(channel));
+            if (missingChannels.length > 0) {
+                const completionRate = ((requiredChannels.length - missingChannels.length) / requiredChannels.length * 100).toFixed(0);
+                console.log(`[DEBUG] Incomplete session (${completionRate}% complete) - not saving to database yet. Missing: ${missingChannels.join(', ')}`);
+                return; // Don't save incomplete sessions
+            }
+        }
+        
+        // Defensive: deep copy results to avoid mutation by chart/annotation code
+        const resultsCopy = JSON.parse(JSON.stringify(results));
+        
         // Only save multi-fluorophore session if we have data from multiple fluorophores
         if (fluorophores.length < 2) {
             console.log('[DEBUG] Not enough fluorophores to save combined session. fluorophores:', fluorophores);
@@ -2610,7 +2657,14 @@ async function saveCombinedSession(filename, combinedResults, fluorophores = [])
     console.log('Individual sessions working correctly:', fluorophores);
     
     // Extract experiment pattern for polling
-    const experimentPattern = getCurrentFullPattern() || 'AcBVAB_2578825_CFX367393';
+    const experimentPattern = getCurrentFullPattern();
+    
+    if (!experimentPattern) {
+        console.error('❌ PATHOGEN GRIDS - No valid experiment pattern found! Cannot start polling.');
+        alert('Error: Unable to determine experiment pattern from uploaded files. Please check your file names match the expected format.');
+        return;
+    }
+    
     console.log('🔍 PATHOGEN GRIDS - Starting automatic polling for pattern:', experimentPattern);
     
     // Start polling for the combined session that the backend will save
@@ -2902,7 +2956,6 @@ function checkCurrentExperimentComplete() {
     
     // Check how many channels this experiment type requires
     const testCode = extractTestCode(currentPattern);
-    const requiredChannels = ['FAM', 'HEX', 'Cy5']; // BVAB requires 3 channels
     
     // Count available fluorophores in current results
     const results = currentAnalysisResults.individual_results;
@@ -2915,9 +2968,16 @@ function checkCurrentExperimentComplete() {
         }
     });
     
-    // For BVAB experiments, require all 3 channels
-    if (testCode === 'BVAB' || testCode === 'AcBVAB') {
-        return fluorophores.size >= 3;
+    // Check if we have all required channels for this test type
+    if (testCode && typeof getRequiredChannels === 'function') {
+        const requiredChannels = getRequiredChannels(testCode);
+        if (requiredChannels.length > 0) {
+            const availableChannels = Array.from(fluorophores);
+            const hasAllRequired = requiredChannels.every(channel => availableChannels.includes(channel));
+            
+            console.log(`📊 Test ${testCode} requires channels: [${requiredChannels.join(', ')}], available: [${availableChannels.join(', ')}], complete: ${hasAllRequired}`);
+            return hasAllRequired;
+        }
     }
     
     // For other experiments, consider complete if has data
@@ -3397,7 +3457,7 @@ function calculatePathogenBreakdownFromSessions(sessions) {
             }
             
             // Fallback: Try to extract from stored pathogen_breakdown if available
-            if ((!fluorophore || fluorophore === 'Unknown') && 
+            /*if ((!fluorophore || fluorophore === 'Unknown') && 
                 session.pathogen_breakdown && 
                 session.pathogen_breakdown !== 'Unknown: 0.0%') {
                 const matches = session.pathogen_breakdown.match(/^(BVAB[123]|Cy5|FAM|HEX|Texas Red|Neisseria gonhorrea):/);
@@ -3410,7 +3470,7 @@ function calculatePathogenBreakdownFromSessions(sessions) {
                     else if (pathogenTarget === 'Neisseria gonhorrea') fluorophore = 'HEX';
                     else fluorophore = pathogenTarget;
                 }
-            }
+            }*/
             
             // Try to extract from well results fluorophore data
             if ((!fluorophore || fluorophore === 'Unknown') && session.well_results && session.well_results.length > 0) {
@@ -3483,9 +3543,16 @@ function calculatePathogenBreakdownFromSessions(sessions) {
         const rate = total > 0 ? (positive / total * 100).toFixed(1) : '0.0';
         
         // Get correct test code and pathogen target
-        const actualTestCode = extractTestCode(session.filename) || 'BVAB';
-        const pathogenTarget = getPathogenTarget(actualTestCode, fluorophore) || fluorophore;
-        console.log(`🔍 HISTORY DEBUG - Session ${session.filename}: testCode=${actualTestCode}, fluorophore=${fluorophore}, target=${pathogenTarget}`);
+        const actualTestCode = extractTestCode(session.filename);
+        let pathogenTarget = fluorophore; // Default to fluorophore name
+        
+        if (actualTestCode) {
+            pathogenTarget = getPathogenTarget(actualTestCode, fluorophore) || fluorophore;
+        } else {
+            console.warn(`❌ Failed to extract test code from filename: ${session.filename}`);
+        }
+        
+        console.log(`🔍 HISTORY DEBUG - Session ${session.filename}: testCode=${actualTestCode || 'UNKNOWN'}, fluorophore=${fluorophore}, target=${pathogenTarget}`);
         
         fluorophoreStats[fluorophore] = `${pathogenTarget}: ${rate}%`;
         console.log(`🔍 HISTORY DEBUG - Final fluorophore stat: ${fluorophore} = ${pathogenTarget}: ${rate}%`);
@@ -3746,10 +3813,14 @@ function calculatePositiveRate(session) {
                 const rate = (group.positive / group.total * 100).toFixed(1);
                 
                 // Extract test code from session filename for pathogen target mapping
-                let pathogenTarget = fluorophore;
+                let pathogenTarget = fluorophore; // Default to fluorophore name
                 if (typeof getPathogenTarget === 'function') {
-                    const testCode = extractTestCode(session.filename) || 'BVAB';
-                    pathogenTarget = getPathogenTarget(testCode, fluorophore) || fluorophore;
+                    const testCode = extractTestCode(session.filename);
+                    if (testCode) {
+                        pathogenTarget = getPathogenTarget(testCode, fluorophore) || fluorophore;
+                    } else {
+                        console.warn(`❌ Failed to extract test code from filename: ${session.filename}`);
+                    }
                 }
                 
                 extractedRates.push(`${pathogenTarget}: ${rate}%`);
@@ -4342,9 +4413,9 @@ async function loadSessionDetails(sessionId) {
         
         // Show pathogen grids for loaded session - DISABLED to prevent duplicate tabs
         // The control validation system already handles pathogen grids
-        if (session.filename && session.filename.includes('BVAB')) {
+       /* if (session.filename && session.filename.includes('BVAB')) {
             console.log('🔍 BVAB session loaded - pathogen grids handled by control validation system');
-        }
+        }*/
         
         // Scroll to analysis section
         document.getElementById('analysisSection').scrollIntoView({ behavior: 'smooth' });
@@ -5601,8 +5672,12 @@ function displayControlValidationAlerts(controlIssues) {
                     <div class="issue-details">
                         <strong>${issue.sampleName}</strong> (${issue.wellKey}, ${(() => {
                             const currentPattern = getCurrentFullPattern();
-                            const testCode = currentPattern ? extractTestCode(currentPattern) : 'BVAB';
+                            const testCode = currentPattern ? extractTestCode(currentPattern) : null;
                             
+                            if (!testCode) {
+                                console.warn('No test code found for control validation display');
+                                return issue.fluorophore || 'Unknown';
+                            }
                             // Enhanced fluorophore detection for control validation display
                             let fluorophore = issue.fluorophore;
                             if (!fluorophore || fluorophore === 'Unknown') {
@@ -6505,40 +6580,9 @@ function getPathogenMappingForTest(testName) {
         return PATHOGEN_LIBRARY[testName];
     }
     
-    // Fallback mapping for known tests
-    const fallbackMappings = {
-        'BVAB': {
-            'HEX': 'BVAB1',
-            'FAM': 'BVAB2', 
-            'Cy5': 'BVAB3'
-        },
-        'BVPanelPCR3': {
-            'Texas Red': 'Prevotella bivia',
-            'HEX': 'Lactobacillus acidophilus',
-            'FAM': 'Gardnerella vaginalis',
-            'Cy5': 'Bifidobacterium breve'
-        },
-        'Ngon': {
-            'HEX': 'Neisseria gonhorrea'
-        },
-        'Cglab': {
-            'FAM': 'Candida glabrata'
-        },
-        'Calb': {
-            'HEX': 'Candida albicans'
-        },
-        'Ctrach': {
-            'FAM': 'Chlamydia trachomatis'
-        },
-        'Tvag': {
-            'FAM': 'Trichomonas vaginalis'
-        },
-        'Mgen': {
-            'FAM': 'Mycoplasma genitalium'
-        }
-    };
-    
-    return fallbackMappings[testName] || {};
+    // No fallback - return empty object if test not found in pathogen library
+    console.warn(`No pathogen mapping found for test: ${testName}`);
+    return {};
 }
 
 // Helper function to validate control amplitude
@@ -6579,7 +6623,7 @@ function validateControlAmplitude(controlType, amplitude, wellData) {
     }
 }
 
-function getPathogenNameFromFluorophore(fluorophore) {
+/*function getPathogenNameFromFluorophore(fluorophore) {
     // Map fluorophores to pathogen names for grid IDs
     const pathogenMap = {
         'HEX': 'BVAB1',
@@ -6588,7 +6632,7 @@ function getPathogenNameFromFluorophore(fluorophore) {
         'Texas Red': 'BVPanelPCR3-TexasRed'
     };
     return pathogenMap[fluorophore] || fluorophore;
-}
+}*/
 
 // Control validation functions
 function getControlType(sampleName) {
@@ -8720,6 +8764,7 @@ async function displaySessionResults(session) {
                 sample: well.sample_name,
                 sample_name: well.sample_name,
                 cq_value: well.cq_value,
+                threshold_value: well.threshold_value, // Include threshold value for chart rendering
                 anomalies: (() => {
                     try {
                         if (Array.isArray(well.anomalies)) {
@@ -8787,6 +8832,12 @@ async function displaySessionResults(session) {
         // Set global analysis results
         analysisResults = transformedResults;
         currentAnalysisResults = transformedResults;
+        
+        // Ensure threshold values are properly propagated across all wells
+        if (transformedResults.individual_results) {
+            propagateThresholdsToWells(transformedResults.individual_results);
+            console.log('[SESSION LOAD] Threshold values propagated after loading session data');
+        }
         
         console.log('Combined session transformed - total wells:', totalWells, 'individual results:', Object.keys(transformedResults.individual_results).length);
         console.log('Sample well keys:', Object.keys(transformedResults.individual_results).slice(0, 10));
@@ -9178,7 +9229,7 @@ function getPathogenTargets(testName) {
     // Map test names to their pathogen targets
     const pathogenMap = {
         'BVAB': ['BVAB1 (HEX)', 'BVAB2 (FAM)', 'BVAB3 (Cy5)'],
-        'BVPanelPCR3': ['BVAB1 (HEX)', 'BVAB2 (FAM)', 'BVAB3 (Cy5)', 'Prevotella bivia (Texas Red)'],
+        'BVPanelPCR3': ['Lactobacillus acidophilus (HEX)', 'Gardnerella vaginalis (FAM)', 'Bifidobacterium breve (Cy5)', 'Prevotella bivia (Texas Red)'],
         'Ngon': ['Neisseria gonhorrea (HEX)'],
         'Cglab': ['Candida glabrata (FAM)'],
         'Ctrach': ['Chlamydia trachomatis (FAM)'],
@@ -9304,7 +9355,7 @@ function getControlValidationForPathogen(pathogenName, controlType, setNumber) {
     const controlIssues = validateControls(individualResults);
     
     // Map pathogen names to their fluorophores
-    const pathogenToFluorophore = {
+   /* const pathogenToFluorophore = {
         'BVAB1': 'HEX',
         'BVAB2': 'FAM', 
         'BVAB3': 'Cy5',
@@ -9333,7 +9384,7 @@ function getControlValidationForPathogen(pathogenName, controlType, setNumber) {
     const expectedCoordinate = controlCoordinateSets[setNumber] && controlCoordinateSets[setNumber][controlType];
     if (!expectedCoordinate) {
         return null;
-    }
+    }*/
     
     // Look for validation issues for this specific coordinate and fluorophore
     const wellKey = `${expectedCoordinate}_${targetFluorophore}`;
@@ -9508,11 +9559,11 @@ async function generatePathogenGridsManually() {
         
         if (combinedSessions.length === 0) {
             // Try alternate search patterns
-            const alternateNames = sessions.filter(s => s.filename && (
+            /*const alternateNames = sessions.filter(s => s.filename && (
                 s.filename.includes('Combined') || 
                 s.filename.includes('Fluorophore') ||
                 s.filename.includes('Multi') ||
-                s.filename.includes('BVAB') && s.total_wells > 1000
+                (s.filename.includes('BVAB') && s.total_wells > 1000)
             ));
             console.log('🔬 MANUAL GRIDS - Alternate session candidates:', alternateNames.map(s => s.filename));
             
@@ -9524,8 +9575,8 @@ async function generatePathogenGridsManually() {
             
             alert('No multi-fluorophore analysis sessions found. Please complete a multi-channel analysis first.');
             return;
+        }*/
         }
-        
         // Get the newest session (sessions are sorted by date, newest first)
         const newestSession = combinedSessions[0];
         console.log('🔬 MANUAL GRIDS - Found newest combined session:', newestSession.filename);

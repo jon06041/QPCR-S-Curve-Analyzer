@@ -210,13 +210,20 @@ function extractControlGridData() {
     // Extract control samples directly from analysis results
     // Use the same logic as the results table "Controls" filter
     function extractTestPattern(sampleName) {
-        if (!sampleName) return 'AcBVAB';
+        if (!sampleName) {
+            console.warn('No sample name provided for test pattern extraction');
+            return null;
+        }
         const match = sampleName.match(/^(Ac[A-Za-z]+)/);
-        return match && match[1] ? match[1] : 'AcBVAB';
+        if (!match || !match[1]) {
+            console.warn('Failed to extract test pattern from sample name:', sampleName);
+            return null;
+        }
+        return match[1];
     }
     
     const testPattern = window.currentAnalysisResults && window.currentAnalysisResults.length > 0 ? 
-        extractTestPattern(window.currentAnalysisResults[0].sample_name || '') : 'AcBVAB';
+        extractTestPattern(window.currentAnalysisResults[0].sample_name || '') : null;
     
     const controlSamples = [];
     
@@ -546,19 +553,21 @@ function getControlTypeAndSetFromSample(sampleName) {
     
     const name = sampleName.toString().trim();
     
-    // Pattern matching for the actual BVAB control naming format: AcBVAB362273G23NTC-2578825
-    const bvabPatterns = [
-        { regex: /AcBVAB\d+[A-P]\d+([HML])-\d+/, typeIndex: 1 },        // AcBVAB362273G23H-2578825
-        { regex: /AcBVAB\d+[A-P]\d+(NTC)-\d+/, typeIndex: 1 }           // AcBVAB362273G23NTC-2578825
+    // Universal pattern matching for any test control naming format
+    // Pattern: AcTEST_NUMBER_COORDINATE_CONTROL_TYPE-SET_ID
+    // Examples: AcBVAB362273G23H-2578825, AcMgen361652A14L-2576640, AcCglab123456B12NTC-1234567
+    const universalPatterns = [
+        { regex: /Ac[A-Za-z]+\d+[A-P]\d+([HML])-\d+/, typeIndex: 1 },        // AcTEST123A1H-456 
+        { regex: /Ac[A-Za-z]+\d+[A-P]\d+(NTC)-\d+/, typeIndex: 1 }           // AcTEST123A1NTC-456
     ];
     
-    for (const pattern of bvabPatterns) {
+    for (const pattern of universalPatterns) {
         const match = name.match(pattern.regex);
         if (match) {
             const type = match[pattern.typeIndex];
             
             // Extract coordinate-based set number from the sample name
-            // Map common control coordinates to set numbers
+            // Map common control coordinates to set numbers (universal for all tests)
             let set = 1; // Default
             
             if (name.includes('G23') || name.includes('G10')) set = 1;      // Set 1

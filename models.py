@@ -18,6 +18,7 @@ class AnalysisSession(db.Model):
     cycle_max = db.Column(db.Integer)
     cycle_count = db.Column(db.Integer)
     pathogen_breakdown = db.Column(db.Text)  # Store pathogen breakdown display string
+    session_type = db.Column(db.String(1))  # 'S' for single/individual, 'M' for multi-channel
     
     # Relationship to well results
     well_results = db.relationship('WellResult', backref='session', lazy=True, cascade='all, delete-orphan')
@@ -32,7 +33,8 @@ class AnalysisSession(db.Model):
             'success_rate': self.success_rate,
             'cycle_range': f"{self.cycle_min}-{self.cycle_max}" if self.cycle_min and self.cycle_max else None,
             'cycle_count': self.cycle_count,
-            'pathogen_breakdown': self.pathogen_breakdown
+            'pathogen_breakdown': self.pathogen_breakdown,
+            'session_type': self.session_type  # 'S' for single/individual, 'M' for multi-channel
         }
 
 class WellResult(db.Model):
@@ -54,6 +56,7 @@ class WellResult(db.Model):
     baseline = db.Column(db.Float)
     data_points = db.Column(db.Integer)
     cycle_range = db.Column(db.Float)
+    threshold_value = db.Column(db.Float)  # Store threshold value for chart rendering
     
     # JSON fields for complex data
     fit_parameters = db.Column(db.Text)  # JSON string
@@ -95,6 +98,7 @@ class WellResult(db.Model):
             'baseline': self.baseline,
             'data_points': self.data_points,
             'cycle_range': self.cycle_range,
+            'threshold_value': self.threshold_value,  # Include threshold value
             'fit_parameters': json.loads(self.fit_parameters) if self.fit_parameters else None,
             'parameter_errors': json.loads(self.parameter_errors) if self.parameter_errors else None,
             'fitted_curve': json.loads(self.fitted_curve) if self.fitted_curve else None,

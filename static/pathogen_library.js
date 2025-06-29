@@ -70,7 +70,7 @@ const PATHOGEN_LIBRARY = {
     "LactoNY": {
         "Cy5": "Lactobacillus jenseni",
         "FAM": "Lactobacillus gasseri",
-        "HEX": "Lactobacillus iners", 
+        "HEX": "Lactobacillus iners",
         "Texas Red": "Lactobacillus crispatus"
     },
     "RNaseP": {
@@ -332,15 +332,30 @@ function extractTestCode(experimentPattern) {
 }
 
 /**
- * Get required fluorophore channels for a test
+ * Get required fluorophore channels for a specific test code
  * @param {string} testCode - The PCR test code (without "Ac" prefix)
- * @returns {Array} Array of required fluorophore channels
+ * @returns {string[]} Array of required fluorophore channels
  */
 function getRequiredChannels(testCode) {
+    if (!testCode) return [];
+    
     const testData = PATHOGEN_LIBRARY[testCode];
     if (!testData) return [];
     
-    return Object.keys(testData).filter(channel => channel !== 'Unknown');
+    return Object.keys(testData);
+}
+
+/**
+ * Check if the required channels are available for a test
+ * @param {string} testCode - The PCR test code 
+ * @param {string[]} availableChannels - Array of available fluorophore channels
+ * @returns {boolean} True if all required channels are available
+ */
+function hasRequiredChannels(testCode, availableChannels) {
+    const required = getRequiredChannels(testCode);
+    if (required.length === 0) return true; // Unknown test, assume valid
+    
+    return required.every(channel => availableChannels.includes(channel));
 }
 
 /**
@@ -430,7 +445,7 @@ function getTestCompletionStatus(sessions) {
             }
         }
         
-        // Clean trailing dashes to handle filename inconsistencies (AcBVAB_2578826_CFX367394- -> AcBVAB_2578826_CFX367394)
+        // Clean trailing dashes to handle filename inconsistencies (AcBVAB_2578826_CFX367393- -> AcBVAB_2578826_CFX367393)
         const pattern = /^([A-Za-z][A-Za-z0-9]*_\d+_CFX\d+)/i;
         const match = basePattern.match(pattern);
         if (match) {
@@ -534,5 +549,5 @@ function getTestCompletionStatus(sessions) {
 
 // Export for use in main script
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { PATHOGEN_LIBRARY, getPathogenTarget, extractTestCode };
+    module.exports = { PATHOGEN_LIBRARY, getPathogenTarget, extractTestCode, getRequiredChannels, hasRequiredChannels };
 }
