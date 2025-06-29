@@ -20,29 +20,88 @@ function propagateThresholdsToWells(individualResults) {
         console.log('[THRESHOLD PROPAGATION] All wells have threshold_value.');
     }
 }
-// --- Robust Chart.js annotation plugin registration ---
+// ...existing code...
+
+// --- Enhanced Chart.js annotation plugin registration ---
 function registerChartAnnotationPlugin() {
-    if (!window.Chart || !window.Chart.register) return;
-    // Try both possible global names
+    if (!window.Chart || !window.Chart.register) {
+        console.warn('[Chart.js] Chart.js not loaded yet, retrying in 100ms...');
+        setTimeout(registerChartAnnotationPlugin, 100);
+        return;
+    }
+    
+    // Try multiple possible global names for the annotation plugin
     let plugin = null;
+    
+    // Check for different annotation plugin variations
     if (window.ChartAnnotation) {
         plugin = window.ChartAnnotation;
+        console.log('[Chart.js] Found annotation plugin as ChartAnnotation');
     } else if (window.chartjsPluginAnnotation) {
         plugin = window.chartjsPluginAnnotation;
+        console.log('[Chart.js] Found annotation plugin as chartjsPluginAnnotation');
+    } else if (window.annotationPlugin) {
+        plugin = window.annotationPlugin;
+        console.log('[Chart.js] Found annotation plugin as annotationPlugin');
+    } else if (window['chartjs-plugin-annotation']) {
+        plugin = window['chartjs-plugin-annotation'];
+        console.log('[Chart.js] Found annotation plugin as chartjs-plugin-annotation');
     }
+    
     if (plugin) {
-        // Only register if not already registered
-        if (!Chart.registry.plugins.get('annotation')) {
+        try {
+            // Check if already registered
+            if (Chart.registry && Chart.registry.plugins && Chart.registry.plugins.get('annotation')) {
+                console.log('[Chart.js] Annotation plugin already registered');
+                return;
+            }
+            
+            // Register the plugin
             Chart.register(plugin);
-            console.log('[Chart.js] Annotation plugin registered!');
+            console.log('[Chart.js] Annotation plugin registered successfully!');
+            
+            // Verify registration
+            if (Chart.registry.plugins.get('annotation')) {
+                console.log('[Chart.js] Annotation plugin registration verified');
+            } else {
+                console.warn('[Chart.js] Annotation plugin registration failed verification');
+            }
+        } catch (error) {
+            console.error('[Chart.js] Error registering annotation plugin:', error);
         }
     } else {
-        console.warn('[Chart.js] Annotation plugin NOT registered. Threshold lines will not be visible.');
+        console.warn('[Chart.js] Annotation plugin NOT found. Threshold lines will not be visible.');
+        console.log('[Chart.js] Available window objects:', Object.keys(window).filter(key => key.toLowerCase().includes('chart') || key.toLowerCase().includes('annotation')));
+        
+        // Try to load from CDN if not found
+        if (!document.querySelector('script[src*="chartjs-plugin-annotation"]')) {
+            console.log('[Chart.js] Attempting to load annotation plugin from CDN...');
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js';
+            script.onload = () => {
+                console.log('[Chart.js] Annotation plugin loaded from CDN, retrying registration...');
+                setTimeout(registerChartAnnotationPlugin, 100);
+            };
+            script.onerror = () => {
+                console.error('[Chart.js] Failed to load annotation plugin from CDN');
+            };
+            document.head.appendChild(script);
+        }
     }
 }
+
+// Register immediately and on DOM ready
 registerChartAnnotationPlugin();
-document.addEventListener('DOMContentLoaded', registerChartAnnotationPlugin);
-let wellSortMode = 'letter-first'; // 'letter-first' or 'number-first'
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(registerChartAnnotationPlugin, 500);
+});
+
+// Also try after Chart.js is loaded
+if (window.Chart) {
+    setTimeout(registerChartAnnotationPlugin, 100);
+}
+
+// ...existing code...
 
 function toggleWellSortMode() {
     wellSortMode = (wellSortMode === 'letter-first') ? 'number-first' : 'letter-first';
@@ -223,7 +282,7 @@ function extractBasePattern(filename) {
     // Handle Multi-Fluorophore Analysis names first
     if (filename.includes('Multi-Fluorophore Analysis')) {
         // Extract the actual experiment pattern from the end
-        // "Multi-Fluorophore Analysis (Cy5, FAM, HEX) AcBVAB_2578825_CFX367393" -> "AcBVAB_2578825_CFX367393"
+        
         const match = filename.match(/([A-Za-z][A-Za-z0-9]*_\d+_CFX\d+)$/i);
         if (match) {
             return match[1];
@@ -239,8 +298,7 @@ function extractBasePattern(filename) {
         }
     }
     
-    // Extract base pattern from CFX Manager filename, handling trailing dashes
-    // Examples: AcBVAB_2578825_CFX367393, AcBVAB_2578826_CFX367394-, AcBVAB_2578826_CFX367394-
+    
     const pattern = /^([A-Za-z][A-Za-z0-9]*_\d+_CFX\d+)/i;
     const match = filename.match(pattern);
     if (match) {
@@ -251,7 +309,7 @@ function extractBasePattern(filename) {
 }
 
 function extractTestName(filename) {
-    // Extract test name from pattern (e.g., "AcBVAB" from "AcBVAB_2578825_CFX367393")
+    // Extract test name from pattern (e.g., "Actest" from "Actest_2578825_CFX367393")
     const basePattern = extractBasePattern(filename);
     const testMatch = basePattern.match(/^([A-Za-z][A-Za-z0-9]*)/i);
     return testMatch ? testMatch[1] : basePattern;
@@ -278,7 +336,7 @@ function handleFileUpload(file, type = 'amplification') {
     if (type === 'amplification') {
         // Validate that amplification files contain "Quantification Amplification Results"
         if (!file.name.includes('Quantification Amplification Results')) {
-            alert(`Invalid amplification file name. File must contain "Quantification Amplification Results".\nYour file: ${file.name}\nExpected format: AcBVAB_2578825_CFX367393 - Quantification Amplification Results_Cy5.csv`);
+            alert(`Invalid amplification file name. File must contain "Quantification Amplification Results".\nYour file: ${file.name}\nExpected format: Actest_2578825_CFX367393 - Quantification Amplification Results_Cy5.csv`);
             return;
         }
         
@@ -291,7 +349,7 @@ function handleFileUpload(file, type = 'amplification') {
     } else if (type === 'samples') {
         // Validate that summary files contain "Quantification Summary"
         if (!file.name.includes('Quantification Summary')) {
-            alert(`Invalid summary file name. File must contain "Quantification Summary".\nYour file: ${file.name}\nExpected format: AcBVAB_2578825_CFX367393 - Quantification Summary_0.csv`);
+            alert(`Invalid summary file name. File must contain "Quantification Summary".\nYour file: ${file.name}\nExpected format: Actest_2578825_CFX367393 - Quantification Summary_0.csv`);
             return;
         }
         
@@ -319,7 +377,7 @@ function handleFileUpload(file, type = 'amplification') {
         if (referencePattern) {
             const newBasePattern = extractBasePattern(file.name);
             if (referencePattern !== newBasePattern) {
-                alert(`File pattern mismatch! All files must share the same base pattern.\nExisting pattern: ${referencePattern}\nNew file pattern: ${newBasePattern}\n\nExample: AcBVAB_2578825_CFX367393 - only this part must match, suffixes can differ.`);
+                alert(`File pattern mismatch! All files must share the same base pattern.\nExisting pattern: ${referencePattern}\nNew file pattern: ${newBasePattern}\n\nExample: Actest_2578825_CFX367393 - only this part must match, suffixes can differ.`);
                 return;
             }
         }
@@ -3456,21 +3514,7 @@ function calculatePathogenBreakdownFromSessions(sessions) {
                 }
             }
             
-            // Fallback: Try to extract from stored pathogen_breakdown if available
-            /*if ((!fluorophore || fluorophore === 'Unknown') && 
-                session.pathogen_breakdown && 
-                session.pathogen_breakdown !== 'Unknown: 0.0%') {
-                const matches = session.pathogen_breakdown.match(/^(BVAB[123]|Cy5|FAM|HEX|Texas Red|Neisseria gonhorrea):/);
-                if (matches) {
-                    const pathogenTarget = matches[1];
-                    // Map pathogen target back to fluorophore
-                    if (pathogenTarget === 'BVAB1') fluorophore = 'HEX';
-                    else if (pathogenTarget === 'BVAB2') fluorophore = 'FAM';
-                    else if (pathogenTarget === 'BVAB3') fluorophore = 'Cy5';
-                    else if (pathogenTarget === 'Neisseria gonhorrea') fluorophore = 'HEX';
-                    else fluorophore = pathogenTarget;
-                }
-            }*/
+            
             
             // Try to extract from well results fluorophore data
             if ((!fluorophore || fluorophore === 'Unknown') && session.well_results && session.well_results.length > 0) {
@@ -4413,8 +4457,8 @@ async function loadSessionDetails(sessionId) {
         
         // Show pathogen grids for loaded session - DISABLED to prevent duplicate tabs
         // The control validation system already handles pathogen grids
-       /* if (session.filename && session.filename.includes('BVAB')) {
-            console.log('🔍 BVAB session loaded - pathogen grids handled by control validation system');
+       /* if (session.filename && session.filename.includes('test')) {
+            console.log('🔍 test session loaded - pathogen grids handled by control validation system');
         }*/
         
         // Scroll to analysis section
@@ -5018,7 +5062,7 @@ async function saveExperimentStatistics(experimentPattern, allResults, fluoropho
         console.log('Saving experiment statistics for:', experimentPattern, 'with fluorophores:', fluorophores);
         console.log('Results structure:', allResults);
         
-        // Extract test name from experiment pattern (e.g., AcBVAB_2578825_CFX367393 -> AcBVAB)
+        // Extract test name from experiment pattern (e.g., Actest_2578825_CFX367393 -> Actest)
         const testName = experimentPattern.split('_')[0] || 'Unknown';
         
         // Calculate fluorophore breakdown
@@ -5841,7 +5885,7 @@ function displayTrendAnalysis(experiments) {
             }
             
             html += `<div class="fluorophore-trend-row">`;
-            // Extract test code from test name (AcBVAB -> BVAB)
+            // Extract test code from test name (Actest -> test)
             const testCode = testName.startsWith('Ac') ? testName.substring(2) : testName;
             let pathogenTarget = 'Unknown';
             let fluorophoreColor = '#666';
@@ -6034,7 +6078,7 @@ function extractControlTypeFromSample(sampleName) {
         return 'NTC';
     }
     
-    // Look for H, M, L patterns in sample name like AcBVAB362273J02H-2578825
+    // Look for H, M, L patterns in sample name like Actest362273J02H-2578825
     const controlMatch = sampleName.match(/([HML])-?\d*$/);
     if (controlMatch) {
         const controlType = controlMatch[1];
@@ -6567,7 +6611,7 @@ function createPathogenGrid(pathogenName, pathogenControls) {
 function extractTestName(experimentPattern) {
     if (!experimentPattern) return 'Unknown';
     
-    // Extract test name from pattern like "AcBVAB_2578825_CFX367393" -> "BVAB"
+    // Extract test name from pattern like "Actest_2578825_CFX367393" -> "test"
     // or "AcBVPanelPCR3_2576724_CFX366953" -> "BVPanelPCR3"
     const match = experimentPattern.match(/^Ac([A-Za-z0-9]+)_/);
     return match ? match[1] : 'Unknown';
@@ -6626,10 +6670,10 @@ function validateControlAmplitude(controlType, amplitude, wellData) {
 /*function getPathogenNameFromFluorophore(fluorophore) {
     // Map fluorophores to pathogen names for grid IDs
     const pathogenMap = {
-        'HEX': 'BVAB1',
-        'FAM': 'BVAB2', 
-        'Cy5': 'BVAB3',
-        'Texas Red': 'BVPanelPCR3-TexasRed'
+        'HEX': 'test1',
+        'FAM': 'test2', 
+        'Cy5': 'test3',
+        'Texas Red': 'test4'
     };
     return pathogenMap[fluorophore] || fluorophore;
 }*/
@@ -6750,7 +6794,7 @@ function extractTestNameFromPattern(experimentPattern) {
         return 'Unknown';
     }
     
-    // Extract test name from pattern (e.g., "AcBVAB_2578825_CFX367393" -> "BVAB")
+    // Extract test name from pattern (e.g., "Actest_2578825_CFX367393" -> "test")
     const match = experimentPattern.match(/^Ac([A-Za-z0-9]+)_/);
     if (match) {
         return match[1];
@@ -7256,7 +7300,7 @@ function filterTable() {
             } else if (statusFilter === 'redo') {
                 matchesStatus = results.includes('redo');
             } else if (statusFilter === 'controls') {
-                // Controls are samples that start with the test pattern (e.g., AcBVAB)
+                // Controls are samples that start with the test pattern (e.g., Actest)
                 const sampleNameOriginal = row.cells[1] ? row.cells[1].textContent : '';
                 matchesStatus = sampleNameOriginal.startsWith(testPattern);
             }
@@ -8920,7 +8964,7 @@ async function displaySessionResults(session) {
         
         // Trigger control validation for loaded session - DISABLED to prevent duplicate tabs
         // The control validation system already handles pathogen grids
-        console.log('🔍 Combined BVAB session loaded - pathogen grids handled by control validation system');
+        console.log('🔍 Combined test session loaded - pathogen grids handled by control validation system');
         
         console.log('Combined session loaded successfully:', session.filename, 'with', Object.keys(transformedResults.individual_results).length, 'wells');
         
@@ -9123,7 +9167,7 @@ function extractWellCoordinate(wellKey) {
     return { row: match[1], col: match[2] };
 }
 
-// Extract control type from sample name (e.g., "AcBVAB-H-1" -> "H")
+// Extract control type from sample name (e.g., "Actest-H-1" -> "H")
 function extractControlType(sampleName) {
     const controlMatch = sampleName.match(/[HML]-\d+$|NTC-\d+$/);
     if (controlMatch) {
@@ -9138,7 +9182,7 @@ function extractControlType(sampleName) {
 function createIndividualPathogenGrid(pathogenName, controlSets, gridIndex) {
     const setCount = Object.keys(controlSets).length;
     
-    // Create grid HTML with 3x4 layout for BVAB (3 channels, 4th column blank)
+    // Create grid HTML with 3x4 layout for test (3 channels, 4th column blank)
     let gridHtml = `
         <div class="pathogen-control-grid">
             <h5>${pathogenName}</h5>
@@ -9180,7 +9224,7 @@ function populatePathogenGrids(controlSets, pathogenTargets) {
     pathogenTargets.forEach((pathogen, pathogenIndex) => {
         const gridIndex = pathogenIndex + 1;
         
-        // Extract fluorophore from pathogen name (e.g., "BVAB1 (HEX)" -> "HEX")
+        // Extract fluorophore from pathogen name (e.g., "test1 (HEX)" -> "HEX")
         const fluorophoreMatch = pathogen.match(/\(([^)]+)\)/);
         const targetFluorophore = fluorophoreMatch ? fluorophoreMatch[1] : null;
         
@@ -9228,7 +9272,7 @@ function populatePathogenGrids(controlSets, pathogenTargets) {
 function getPathogenTargets(testName) {
     // Map test names to their pathogen targets
     const pathogenMap = {
-        'BVAB': ['BVAB1 (HEX)', 'BVAB2 (FAM)', 'BVAB3 (Cy5)'],
+        'BVAB': ['BVAcB1 (HEX)', 'BVAB2 (FAM)', 'BVAB3 (Cy5)'],
         'BVPanelPCR3': ['Lactobacillus acidophilus (HEX)', 'Gardnerella vaginalis (FAM)', 'Bifidobacterium breve (Cy5)', 'Prevotella bivia (Texas Red)'],
         'Ngon': ['Neisseria gonhorrea (HEX)'],
         'Cglab': ['Candida glabrata (FAM)'],
@@ -9356,9 +9400,9 @@ function getControlValidationForPathogen(pathogenName, controlType, setNumber) {
     
     // Map pathogen names to their fluorophores
    /* const pathogenToFluorophore = {
-        'BVAB1': 'HEX',
-        'BVAB2': 'FAM', 
-        'BVAB3': 'Cy5',
+        'test1': 'HEX',
+        'test2': 'FAM', 
+        'test3': 'Cy5',
         'Bifidobacterium breve': 'Cy5',
         'Gardnerella vaginalis': 'FAM',
         'Lactobacillus acidophilus': 'HEX',
@@ -9558,24 +9602,7 @@ async function generatePathogenGridsManually() {
         console.log('🔬 MANUAL GRIDS - Multi-Fluorophore sessions found:', combinedSessions.length);
         
         if (combinedSessions.length === 0) {
-            // Try alternate search patterns
-            /*const alternateNames = sessions.filter(s => s.filename && (
-                s.filename.includes('Combined') || 
-                s.filename.includes('Fluorophore') ||
-                s.filename.includes('Multi') ||
-                (s.filename.includes('BVAB') && s.total_wells > 1000)
-            ));
-            console.log('🔬 MANUAL GRIDS - Alternate session candidates:', alternateNames.map(s => s.filename));
             
-            if (alternateNames.length > 0) {
-                console.log('🔬 MANUAL GRIDS - Using alternate session:', alternateNames[0].filename);
-                await loadSessionDetails(alternateNames[0].id);
-                return;
-            }
-            
-            alert('No multi-fluorophore analysis sessions found. Please complete a multi-channel analysis first.');
-            return;
-        }*/
         }
         // Get the newest session (sessions are sorted by date, newest first)
         const newestSession = combinedSessions[0];

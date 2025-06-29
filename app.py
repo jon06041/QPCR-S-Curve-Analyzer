@@ -59,9 +59,14 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
         
 
         # Use base pattern as experiment name for single channel sessions (strip any trailing ' -  Quantification Amplification Results...' etc)
-        experiment_name = extract_base_pattern(filename)
+        base_pattern = extract_base_pattern(filename)
         # Remove any trailing ' -  Quantification Amplification Results...' or similar suffixes
-        experiment_name = re.sub(r'\s*-\s*Quantification Amplification Results.*$', '', experiment_name, flags=re.IGNORECASE)
+        base_pattern = re.sub(r'\s*-\s*Quantification Amplification Results.*$', '', base_pattern, flags=re.IGNORECASE)
+        
+        # Use only the base pattern for session naming (no fluorophore suffix)
+        experiment_name = base_pattern
+        
+        print(f"DEBUG: Individual channel session naming - base_pattern: {base_pattern}, fluorophore: {fluorophore}, final_name: {experiment_name}")
         
         print(f"DEBUG: Individual channel session - filename: {filename}, fluorophore: {fluorophore}")
         
@@ -124,12 +129,12 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                         break
                 except (ValueError, TypeError):
                     continue
-        
+        s
         # Default cycle info if not found
-        if cycle_count is None:
+        '''if cycle_count is None:
             cycle_count = 33
             cycle_min = 1
-            cycle_max = 33
+            cycle_max = 33'''
         
         # Calculate pathogen breakdown for individual channel
         pathogen_breakdown_display = None
@@ -141,7 +146,7 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                 test_code = test_code[2:]  # Remove "Ac" prefix
             
             # Enhanced pathogen mapping for all test types
-            pathogen_target = fluorophore  # Default fallback
+            '''pathogen_target = fluorophore  # Default fallback
             
             if test_code == 'BVAB':
                 pathogen_mapping = {
@@ -163,7 +168,7 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             elif test_code == 'Upar' and fluorophore == 'FAM':
                 pathogen_target = 'Ureaplasma parvum'
             elif test_code == 'Uure' and fluorophore == 'FAM':
-                pathogen_target = 'Ureaplasma urealyticum'
+                pathogen_target = 'Ureaplasma urealyticum'''
             
             print(f"Backend pathogen mapping: {test_code} + {fluorophore} -> {pathogen_target}")
             
@@ -183,6 +188,10 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
         else:
             print(f"No fluorophore detected for individual channel session: {filename}")
         
+        # Determine session type based on test requirements and detected fluorophore
+        session_type = determine_session_type(base_pattern, fluorophore)
+        print(f"DEBUG: Determined session type: {session_type} for {base_pattern} with fluorophore {fluorophore}")
+        
         # Check for existing session with same complete filename and overwrite
         existing_session = AnalysisSession.query.filter_by(filename=experiment_name).first()
         
@@ -197,6 +206,7 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             session.cycle_min = cycle_min
             session.cycle_max = cycle_max
             session.pathogen_breakdown = pathogen_breakdown_display
+            session.session_type = session_type
             session.upload_timestamp = datetime.utcnow()
         else:
             # Create new session
@@ -209,6 +219,7 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             session.cycle_min = cycle_min
             session.cycle_max = cycle_max
             session.pathogen_breakdown = pathogen_breakdown_display
+            session.session_type = session_type
             session.upload_timestamp = datetime.utcnow()
             db.session.add(session)
         
@@ -382,6 +393,14 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                         print(f"Cycle range error for {well_key}: {e}, value: {well_data.get('cycle_range')} type: {type(well_data.get('cycle_range'))}")
                     well_result.cycle_range = None
                 
+                # Save threshold_value for chart rendering
+                try:
+                    well_result.threshold_value = float(well_data.get('threshold_value', 0)) if well_data.get('threshold_value') is not None else None
+                except Exception as e:
+                    if well_key in ['N20', 'N21', 'N22', 'O1', 'P1']:
+                        print(f"Threshold value error for {well_key}: {e}, value: {well_data.get('threshold_value')} type: {type(well_data.get('threshold_value'))}")
+                    well_result.threshold_value = None
+                
                 # Save chart data with enhanced validation
                 try:
                     # Try multiple field names for cycles data
@@ -536,10 +555,28 @@ def control_grids():
     if not pattern:
         return jsonify({'error': 'Missing pattern parameter'}), 400
 
+    print(f"[CONTROL GRID] Looking for pattern: {pattern}")
+    
     # Find the most recent session matching the pattern (exact match, no fallback)
     session = AnalysisSession.query.filter_by(filename=pattern).order_by(AnalysisSession.upload_timestamp.desc()).first()
+    
     if not session:
-        return jsonify({'error': f'No session found for pattern: {pattern}'}), 404
+        print(f"[CONTROL GRID] No session found for pattern: {pattern}")
+        # List available sessions for debugging
+        all_sessions = AnalysisSession.query.all()
+        available_patterns = [s.filename for s in all_sessions]
+        print(f"[CONTROL GRID] Available sessions: {available_patterns}")
+        return jsonify({
+            'error': f'No session found for pattern: {pattern}', 
+            'available_patterns': available_patterns
+        }), 404
+
+    print(f"[CONTROL GRID] Found session: {session.filename} (ID: {session.id})")
+    
+    # Verify pattern matches exactly to prevent session mixing
+    if session.filename != pattern:
+        print(f"[CONTROL GRID] Pattern mismatch: requested={pattern}, found={session.filename}")
+        return jsonify({'error': f'Pattern mismatch: requested {pattern}, found {session.filename}'}), 400
 
     # Fetch all wells for this session
     wells = WellResult.query.filter_by(session_id=session.id).all()
@@ -772,10 +809,10 @@ def save_combined_session():
             pattern_match = re.search(r'([A-Za-z][A-Za-z0-9]*_\d+_CFX\d+)', filename)
             if pattern_match:
                 base_pattern = pattern_match.group(1)
-                # Create clean display name with fluorophores
-                fluorophore_list = ', '.join(sorted(fluorophores_list))
-                display_name = f"Multi-Fluorophore Analysis ({fluorophore_list}) {base_pattern}"
+                # Use only the base pattern as experiment name for consistency
                 experiment_name = base_pattern
+                display_name = base_pattern
+                print(f"DEBUG: Multi-channel session naming - base_pattern: {base_pattern}, fluorophores: {fluorophores_list}, display_name: {display_name}")
             else:
                 # Fallback
                 display_name = filename
@@ -785,9 +822,9 @@ def save_combined_session():
             experiment_name = filename.replace('Multi-Fluorophore_', '')
             display_name = experiment_name
         else:
-            # For individual channels, use the complete filename including channel
-            experiment_name = filename
-            display_name = filename
+            # For individual channels, use the base pattern
+            experiment_name = extract_base_pattern(filename)
+            display_name = experiment_name
         
         # Calculate correct statistics from individual results for multi-fluorophore analysis
         individual_results = combined_results.get('individual_results', {})
@@ -836,13 +873,13 @@ def save_combined_session():
                 rate = (breakdown['positive'] / breakdown['total'] * 100) if breakdown['total'] > 0 else 0
                 
                 # Map fluorophore to pathogen target
-                pathogen_target = fluorophore
+                '''pathogen_target = fluorophore
                 if fluorophore == 'Cy5':
                     pathogen_target = 'BVAB3'
                 elif fluorophore == 'FAM':
                     pathogen_target = 'BVAB2'
                 elif fluorophore == 'HEX':
-                    pathogen_target = 'BVAB1'
+                    pathogen_target = 'BVAB1'''
                 
                 pathogen_rates.append(f"{pathogen_target}: {rate:.1f}%")
             
@@ -853,12 +890,12 @@ def save_combined_session():
             for fluorophore, breakdown in fluorophore_breakdown.items():
                 rate = (breakdown['positive'] / breakdown['total'] * 100) if breakdown['total'] > 0 else 0
                 pathogen_target = fluorophore
-                if fluorophore == 'Cy5':
+                '''if fluorophore == 'Cy5':
                     pathogen_target = 'BVAB3'
                 elif fluorophore == 'FAM':
                     pathogen_target = 'BVAB2'
                 elif fluorophore == 'HEX':
-                    pathogen_target = 'BVAB1'
+                    pathogen_target = 'BVAB1'''
                 pathogen_breakdown_display = f"{pathogen_target}: {rate:.1f}%"
         
         # Extract cycle information from first available well
@@ -880,10 +917,14 @@ def save_combined_session():
                     continue
         
         # Default to 33 cycles for this dataset if not found
-        if cycle_count is None:
+        ''' if cycle_count is None:
             cycle_count = 33
             cycle_min = 1
-            cycle_max = 33
+            cycle_max = 33'''
+        
+        # Determine session type for multi-channel sessions (always 'M')
+        session_type = 'M'
+        print(f"DEBUG: Multi-channel session type: {session_type} for {display_name} with fluorophores: {fluorophores_list}")
         
         # Check for existing session with same base pattern and overwrite if found
         existing_session = AnalysisSession.query.filter_by(filename=display_name).first()
@@ -901,6 +942,7 @@ def save_combined_session():
             session.cycle_min = cycle_min
             session.cycle_max = cycle_max
             session.pathogen_breakdown = pathogen_breakdown_display
+            session.session_type = session_type
             session.upload_timestamp = datetime.utcnow()
         else:
             # Create new analysis session
@@ -913,6 +955,7 @@ def save_combined_session():
             session.cycle_min = cycle_min
             session.cycle_max = cycle_max
             session.pathogen_breakdown = pathogen_breakdown_display
+            session.session_type = session_type
             
             db.session.add(session)
         
@@ -988,7 +1031,15 @@ def save_combined_session():
                 well_result.data_points = int(well_data.get('data_points', 0)) if well_data.get('data_points') is not None else None
                 well_result.cycle_range = float(well_data.get('cycle_range', 0)) if well_data.get('cycle_range') is not None else None
                 
-                # Safe chart data processing with enhanced validation
+                # Save threshold_value for chart rendering
+                try:
+                    well_result.threshold_value = float(well_data.get('threshold_value', 0)) if well_data.get('threshold_value') is not None else None
+                except Exception as e:
+                    if well_key in ['N20', 'N21', 'N22', 'O1', 'P1']:
+                        print(f"Threshold value error for {well_key}: {e}, value: {well_data.get('threshold_value')} type: {type(well_data.get('threshold_value'))}")
+                    well_result.threshold_value = None
+                
+                # Save chart data with enhanced validation
                 def safe_process_array_data(data, field_name):
                     """Safely process array data that might be malformed"""
                     if data is None:
@@ -1204,12 +1255,93 @@ def not_found(error):
 def internal_error(error):
     return jsonify({'error': 'Internal server error'}), 500
 
+# Pathogen library data (subset for session type determination)
+PATHOGEN_LIBRARY = {
+    "Lacto": {"Cy5": "Lactobacillus jenseni", "FAM": "Lactobacillus gasseri", "HEX": "Lactobacillus iners", "Texas Red": "Lactobacillus crispatus"},
+    "Calb": {"HEX": "Candida albicans"},
+    "Ctrach": {"FAM": "Chlamydia trachomatis"},
+    "Ngon": {"HEX": "Neisseria gonhorrea"},
+    "Tvag": {"FAM": "Trichomonas vaginalis"},
+    "Cglab": {"FAM": "Candida glabrata"},
+    "Cpara": {"FAM": "Candida parapsilosis"},
+    "Ctrop": {"FAM": "Candida tropicalis"},
+    "Gvag": {"FAM": "Gardnerella vaginalis"},
+    "BVAB2": {"FAM": "BVAB2"},
+    "CHVIC": {"FAM": "CHVIC"},
+    "AtopVag": {"FAM": "Atopobium vaginae"},
+    "Megasphaera": {"FAM": "Megasphaera1", "HEX": "Megasphaera2"},
+    "Efaecalis": {"FAM": "Enterococcus faecaelis"},
+    "Saureus": {"FAM": "Staphylococcus aureus"},
+    "Ecoli": {"FAM": "Escherichia coli"},
+    "AtopVagNY": {"FAM": "Atopobium vaginae"},
+    "BVAB2NY": {"FAM": "BVAB2"},
+    "GvagNY": {"FAM": "Gardnerella vaginalis"},
+    "MegasphaeraNY": {"FAM": "MegasphaeraNY1", "HEX": "MegasphaeraNY2"},
+    "LactoNY": {"Cy5": "Lactobacillus jenseni", "FAM": "Lactobacillus gasseri", "HEX": "Lactobacillus iners", "Texas Red": "Lactobacillus crispatus"},
+    "RNaseP": {"HEX": "Ribonuclease P"},
+    "FLUAB": {"Cy5": "Influenza A", "FAM": "Influenza B"},
+    "InfluenzaA": {"Cy5": "Influenza A"},
+    "InfluenzaB": {"FAM": "Influenza B"},
+    "HPV1": {"FAM": "HPV16", "HEX": "HPV58", "Texas Red": "HPV18", "Cy5": "HPV45"},
+    "HPV2": {"FAM": "HPV51", "HEX": "HPV52", "Cy5": "HPV35"},
+    "HPV3": {"FAM": "HPV31", "HEX": "HPV39", "Texas Red": "HPV56", "Cy5": "HPVBG"},
+    "HPV4": {"FAM": "HPV59", "HEX": "HPV33", "Texas Red": "HPV68"},
+    "Mgen": {"FAM": "Mgen"},
+    "BVPanelPCR1": {"FAM": "Bacteroides fragilis", "HEX": "Mobiluncus curtisii", "Texas Red": "Streptococcus anginosus", "Cy5": "Sneathia sanguinegens"},
+    "BVPanelPCR2": {"FAM": "Atopobium vaginae", "HEX": "Mobiluncus mulieris", "Texas Red": "Megasphaera type 2", "Cy5": "Megasphaera type 1"},
+    "BVPanelPCR3": {"FAM": "Gardnerella vaginalis", "HEX": "Lactobacillus acidophilus", "Texas Red": "Prevotella bivia", "Cy5": "Bifidobacterium breve"},
+    "BVPanelPCR4": {"FAM": "Gardnerella vaginalis", "HEX": "Lactobacillus acidophilus", "Texas Red": "Prevotella bivia", "Cy5": "Bifidobacterium breve"},
+    "BVAB": {"FAM": "BVAB2", "HEX": "BVAB1", "Cy5": "BVAB3"},
+    "BVABNY": {"FAM": "BVAB2", "HEX": "BVAB1", "Cy5": "BVAB3"},
+    "Upar": {"FAM": "Ureaplasma parvum"},
+    "Uure": {"FAM": "Ureaplasma urealyticum"}
+}
+
+def extract_test_code(experiment_pattern):
+    """Extract test code from experiment pattern (removes "Ac" prefix)"""
+    if not experiment_pattern:
+        return ""
+    
+    # Extract the test name part and remove "Ac" prefix
+    test_name = experiment_pattern.split('_')[0]
+    return test_name[2:] if test_name.startswith('Ac') else test_name
+
+def get_required_channels(test_code):
+    """Get required fluorophore channels for a test"""
+    test_data = PATHOGEN_LIBRARY.get(test_code, {})
+    return list(test_data.keys()) if test_data else []
+
+def determine_session_type(experiment_pattern, detected_fluorophores=None):
+    """
+    Determine if a session should be 'S' (single/individual) or 'M' (multi-channel)
+    based on the test requirements from pathogen library
+    """
+    test_code = extract_test_code(experiment_pattern)
+    required_channels = get_required_channels(test_code)
+    
+    # If we have detected fluorophores, use them to make decision
+    if detected_fluorophores:
+        if isinstance(detected_fluorophores, str):
+            detected_fluorophores = [detected_fluorophores]
+        
+        # If multiple fluorophores detected and test requires multiple channels, it's multi-channel
+        if len(detected_fluorophores) > 1 and len(required_channels) > 1:
+            return 'M'
+        # If single fluorophore detected and test only requires one channel, it's single
+        elif len(detected_fluorophores) == 1 and len(required_channels) == 1:
+            return 'S'
+    
+    # Fallback to test requirements: single channel if test requires only 1 channel, multi if more
+    if len(required_channels) <= 1:
+        return 'S'
+    else:
+        return 'M'
+
 if __name__ == '__main__':
     # Ensure static directory exists
     if not os.path.exists('static'):
         os.makedirs('static')
     
     # Run the Flask app (Railway deployment compatible)
-    import os
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
