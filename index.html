@@ -10,6 +10,8 @@
     <meta name="pathogen-grids-version" content="20250627110000">
     <title>PCR Analyzer</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <!-- Chart.js Annotation plugin (required for threshold lines) -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@1.1.0/dist/chartjs-plugin-annotation.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <script src="/static/pathogen_library.js"></script>
     <link rel="stylesheet" href="/static/style.css?v=1735174000">
@@ -196,13 +198,7 @@
                 </div>
             </div>
 
-            <!-- Manual Pathogen Grids Button - Hidden (automatic approach implemented) -->
-            <div id="pathogenGridsManual" style="display: none; margin: 20px 0; text-align: center; background: #f0f0f0; padding: 20px; border: 2px solid #2196F3; border-radius: 8px;">
-                <button onclick="generatePathogenGridsManually()" style="background: #2196F3 !important; color: white !important; padding: 15px 30px !important; border: none !important; border-radius: 8px !important; cursor: pointer !important; font-size: 18px !important; font-weight: bold !important;">
-                    🔬 Generate Pathogen Control Grids
-                </button>
-                <p style="margin: 10px 0 0 0; color: #333; font-size: 16px; font-weight: bold;">Click to generate pathogen-specific control validation grids</p>
-            </div>
+           
 
             <div class="wells-table-container">
                 <h3 id="wellsAnalysisTitle">All Wells Analysis</h3>

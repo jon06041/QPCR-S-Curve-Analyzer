@@ -1,6 +1,10 @@
 /**
  * Real Control Data Integration for Pathogen Grids
  * Creates tabbed interface showing one pathogen's controls at a time
+ *
+ * CHANGE LOG ENTRY (2025-06-28):
+ * Added extra debug logs to showPathogenGridsWithData and extractControlGridData (formerly getRealControlValidationData) for easier troubleshooting and rollback.
+ * No functional changes, only logging for traceability.
  */
 
 // Legacy function for production compatibility
@@ -14,6 +18,9 @@ function showPathogenGridsWithData(testCode, controlSets) {
     console.log('🔍 PATHOGEN GRID v111000 - showPathogenGridsWithData called with testCode:', testCode);
     console.log('🔍 PATHOGEN GRID v111000 - controlSets:', controlSets);
     console.log('🔍 PATHOGEN GRID v111000 - Cache timestamp: 1751029800');
+    // CHANGE LOG: Log currentAnalysisResults and loadedSessionData for debugging
+    console.log('🔍 [CHANGE LOG] window.currentAnalysisResults:', window.currentAnalysisResults);
+    console.log('🔍 [CHANGE LOG] window.loadedSessionData:', window.loadedSessionData);
     
     const container = document.getElementById('pathogenControlGrids');
     if (!container) {
@@ -27,8 +34,8 @@ function showPathogenGridsWithData(testCode, controlSets) {
     console.log('🔍 PATHOGEN GRID - Container found and completely cleared to prevent duplicates');
     
     // Get real control validation data from current analysis
-    console.log('🔍 PATHOGEN GRID - About to call getRealControlValidationData()');
-    const controlValidationData = getRealControlValidationData();
+    console.log('🔍 PATHOGEN GRID - About to call extractControlGridData()');
+    const controlValidationData = extractControlGridData();
     console.log('🔍 PATHOGEN GRID - Real control validation data received:', controlValidationData);
     console.log('🔍 PATHOGEN GRID - Control data keys count:', Object.keys(controlValidationData).length);
     
@@ -105,8 +112,10 @@ function createUniversalPathogenFallback(container, testCode, controlValidationD
     container.innerHTML = fallbackHTML;
 }
 
-function getRealControlValidationData() {
+function extractControlGridData() {
     console.log('🔍 CONTROL GRID DATA - Starting real control validation data extraction');
+    // CHANGE LOG: Extra debug for easier rollback
+    console.log('🔍 [CHANGE LOG] extractControlGridData called.');
     console.log('🔍 CONTROL GRID DATA - Current analysis results available:', !!window.currentAnalysisResults);
     console.log('🔍 CONTROL GRID DATA - Analysis results count:', window.currentAnalysisResults ? window.currentAnalysisResults.length : 0);
     console.log('🔍 CONTROL GRID DATA - *** DEBUG: DATA SOURCE DETECTION ***');
@@ -142,9 +151,20 @@ function getRealControlValidationData() {
     // Show wells with their coordinates and sample names for debugging
     const wellsWithCoords = window.currentAnalysisResults.slice(0, 20).map(w => {
         let coordinate = 'Unknown';
-        if (w.well_id && w.well_id.includes('_')) {
+        // Try well_id with _
+        if (w.well_id && typeof w.well_id === 'string' && w.well_id.includes('_')) {
             const parts = w.well_id.split('_');
             coordinate = parts.length > 0 ? parts[0] : 'Unknown';
+        } else if (w.well_id && typeof w.well_id === 'string') {
+            coordinate = w.well_id;
+        } else if (w.coordinate && typeof w.coordinate === 'string') {
+            coordinate = w.coordinate;
+        } else if (w.sample_name && typeof w.sample_name === 'string') {
+            // Fallback: extract coordinate from sample name (e.g., A1H, B2NTC, etc.)
+            const coordMatch = w.sample_name.match(/([A-P][0-9]{1,2})/i);
+            if (coordMatch) {
+                coordinate = coordMatch[1];
+            }
         }
         return {
             wellId: w.well_id,
@@ -167,9 +187,19 @@ function getRealControlValidationData() {
     const wellsByCoordinate = {};
     window.currentAnalysisResults.forEach(well => {
         let coordinate = 'Unknown';
-        if (well.well_id && well.well_id.includes('_')) {
+        if (well.well_id && typeof well.well_id === 'string' && well.well_id.includes('_')) {
             const parts = well.well_id.split('_');
             coordinate = parts.length > 0 ? parts[0] : 'Unknown';
+        } else if (well.well_id && typeof well.well_id === 'string') {
+            coordinate = well.well_id;
+        } else if (well.coordinate && typeof well.coordinate === 'string') {
+            coordinate = well.coordinate;
+        } else if (well.sample_name && typeof well.sample_name === 'string') {
+            // Fallback: extract coordinate from sample name (e.g., A1H, B2NTC, etc.)
+            const coordMatch = well.sample_name.match(/([A-P][0-9]{1,2})/i);
+            if (coordMatch) {
+                coordinate = coordMatch[1];
+            }
         }
         if (!wellsByCoordinate[coordinate]) {
             wellsByCoordinate[coordinate] = [];
@@ -284,10 +314,20 @@ function getRealControlValidationData() {
     const allSamples = window.currentAnalysisResults.slice(0, 20).map(well => {
         let coordinate = 'Unknown';
         let fluorophore = 'Unknown';
-        if (well.well_id && well.well_id.includes('_')) {
+        if (well.well_id && typeof well.well_id === 'string' && well.well_id.includes('_')) {
             const parts = well.well_id.split('_');
             coordinate = parts.length > 0 ? parts[0] : 'Unknown';
             fluorophore = parts.length > 1 ? parts[1] : 'Unknown';
+        } else if (well.well_id && typeof well.well_id === 'string') {
+            coordinate = well.well_id;
+        } else if (well.coordinate && typeof well.coordinate === 'string') {
+            coordinate = well.coordinate;
+        } else if (well.sample_name && typeof well.sample_name === 'string') {
+            // Fallback: extract coordinate from sample name (e.g., A1H, B2NTC, etc.)
+            const coordMatch = well.sample_name.match(/([A-P][0-9]{1,2})/i);
+            if (coordMatch) {
+                coordinate = coordMatch[1];
+            }
         }
         return {
             coordinate: coordinate,
@@ -403,6 +443,8 @@ function getRealControlValidationData() {
         // Additional debug logging for problematic wells
         if (coordinate === 'Unknown' || coordinate === '') {
             console.log(`🔍 COORDINATE DEBUG - Problematic well_id: "${well.well_id}" (type: ${typeof well.well_id}), sample: "${sampleName}"`);
+        } else {
+            console.log(`🔍 COORDINATE DEBUG - Extracted coordinate: "${coordinate}" from sample: "${sampleName}"`);
         }
         
         // Check if this coordinate is a known control coordinate
@@ -978,4 +1020,4 @@ function createSinglePathogenGrid(pathogen, controlSets) {
 window.showPathogenGridsWithData = showPathogenGridsWithData;
 window.createTabbedPathogenGrids = createTabbedPathogenGrids;
 window.showPathogenTab = showPathogenTab;
-window.getRealControlValidationData = getRealControlValidationData;
+window.extractControlGridData = extractControlGridData;

@@ -1,4 +1,20 @@
+"""
+CHANGE LOG ENTRY (2025-06-28):
+Added /control-grids endpoint for AJAX control grid fetches (for frontend qPCR S-curve analyzer).
+  - Moved endpoint definition to after Flask app is created to avoid 'app is not defined' errors.
+  - Endpoint returns dummy control grid data for now; replace with real logic as needed.
+  - This change is logged for easy rollback if needed, as this section of the code is critical and took significant time to develop.
+  - If reverting, remove the /control-grids endpoint and restore any previous logic as required.
+"""
 from flask import Flask, request, jsonify, send_from_directory
+import json
+import os
+import re
+from datetime import datetime
+from qpcr_analyzer import process_csv_data, validate_csv_structure
+from models import db, AnalysisSession, WellResult, ExperimentStatistics
+from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.exc import OperationalError, IntegrityError, DatabaseError
 import json
 import os
 import re
@@ -41,8 +57,11 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
     try:
         from models import AnalysisSession, WellResult
         
-        # Use complete filename as experiment name for individual channels
-        experiment_name = filename
+
+        # Use base pattern as experiment name for single channel sessions (strip any trailing ' -  Quantification Amplification Results...' etc)
+        experiment_name = extract_base_pattern(filename)
+        # Remove any trailing ' -  Quantification Amplification Results...' or similar suffixes
+        experiment_name = re.sub(r'\s*-\s*Quantification Amplification Results.*$', '', experiment_name, flags=re.IGNORECASE)
         
         print(f"DEBUG: Individual channel session - filename: {filename}, fluorophore: {fluorophore}")
         
@@ -269,7 +288,15 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                 well_result.well_id = well_key
                 well_result.is_good_scurve = bool(well_data.get('is_good_scurve', False))
                 well_result.r2_score = float(well_data.get('r2_score', 0)) if well_data.get('r2_score') is not None else None
-                well_result.sample_name = str(well_data.get('sample_name', '')) if well_data.get('sample_name') else None
+                # Improved control well detection: extract H, M, L, NTC from well_id pattern if sample_name is missing
+                sample_name = well_data.get('sample_name', '')
+                if not sample_name and isinstance(well_key, str):
+                    # Match patterns like ...H02H-..., ...D22NTC-... etc.
+                    import re
+                    match = re.search(r'([A-Za-z0-9]+)(H|M|L|NTC)-', well_key.upper())
+                    if match:
+                        sample_name = match.group(2)
+                well_result.sample_name = str(sample_name) if sample_name else None
                 well_result.cq_value = float(well_data.get('cq_value', 0)) if well_data.get('cq_value') is not None else None
                 
                 # Set fluorophore information in fit_parameters - FIXED LIST/DICT HANDLING
@@ -491,8 +518,48 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
 class Base(DeclarativeBase):
     pass
 
+
+
+# Only one Flask app instance should exist. Remove any duplicate app = Flask(...) lines below.
+
+
+# Only one Flask app instance should exist. Remove any duplicate app = Flask(...) lines below.
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or "qpcr_analyzer_secret_key_2025"
+
+
+# Control grid endpoint (returns real control grid data for a given experiment pattern)
+@app.route('/control-grids', methods=['GET'])
+def control_grids():
+    """Endpoint to fetch control grid data for a given experiment pattern"""
+    pattern = request.args.get('pattern')
+    if not pattern:
+        return jsonify({'error': 'Missing pattern parameter'}), 400
+
+    # Find the most recent session matching the pattern (exact match, no fallback)
+    session = AnalysisSession.query.filter_by(filename=pattern).order_by(AnalysisSession.upload_timestamp.desc()).first()
+    if not session:
+        return jsonify({'error': f'No session found for pattern: {pattern}'}), 404
+
+    # Fetch all wells for this session
+    wells = WellResult.query.filter_by(session_id=session.id).all()
+
+    # Build control_sets: only include wells with type in sample_name (e.g., 'NTC', 'H', 'M', 'L')
+    control_types = ['NTC', 'H', 'M', 'L']
+    control_sets = []
+    for well in wells:
+        sample_name = (well.sample_name or '').strip().upper()
+        for ctype in control_types:
+            if sample_name == ctype:
+                control_sets.append({'well': well.well_id, 'type': ctype})
+                break
+
+    # Return only the actual control wells, no fallback or dummy data
+    return jsonify({
+        'pattern': pattern,
+        'control_sets': control_sets,
+        'message': f'Loaded {len(control_sets)} control wells for pattern {pattern}.'
+    })
 
 # Global quota flag to prevent repeated database operations when quota exceeded
 quota_exceeded = False

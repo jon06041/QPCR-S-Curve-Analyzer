@@ -1,8 +1,111 @@
+// Utility: Propagate threshold_value per fluorophore to all wells, with debug logging
+function propagateThresholdsToWells(individualResults) {
+    if (!individualResults || typeof individualResults !== 'object') return;
+    const fluorThresholds = {};
+    Object.values(individualResults).forEach(well => {
+        if (well && well.fluorophore && typeof well.threshold_value === 'number') {
+            fluorThresholds[well.fluorophore] = well.threshold_value;
+        }
+    });
+    Object.values(individualResults).forEach(well => {
+        if (well && well.fluorophore && fluorThresholds[well.fluorophore] !== undefined) {
+            well.threshold_value = fluorThresholds[well.fluorophore];
+        }
+    });
+    // Aggressive debug log
+    const missing = Object.entries(individualResults).filter(([k, w]) => typeof w.threshold_value !== 'number');
+    if (missing.length > 0) {
+        console.warn('[THRESHOLD PROPAGATION] Some wells missing threshold_value after propagation:', missing.map(([k]) => k));
+    } else {
+        console.log('[THRESHOLD PROPAGATION] All wells have threshold_value.');
+    }
+}
+// --- Robust Chart.js annotation plugin registration ---
+function registerChartAnnotationPlugin() {
+    if (!window.Chart || !window.Chart.register) return;
+    // Try both possible global names
+    let plugin = null;
+    if (window.ChartAnnotation) {
+        plugin = window.ChartAnnotation;
+    } else if (window.chartjsPluginAnnotation) {
+        plugin = window.chartjsPluginAnnotation;
+    }
+    if (plugin) {
+        // Only register if not already registered
+        if (!Chart.registry.plugins.get('annotation')) {
+            Chart.register(plugin);
+            console.log('[Chart.js] Annotation plugin registered!');
+        }
+    } else {
+        console.warn('[Chart.js] Annotation plugin NOT registered. Threshold lines will not be visible.');
+    }
+}
+registerChartAnnotationPlugin();
+document.addEventListener('DOMContentLoaded', registerChartAnnotationPlugin);
+let wellSortMode = 'letter-first'; // 'letter-first' or 'number-first'
+
+function toggleWellSortMode() {
+    wellSortMode = (wellSortMode === 'letter-first') ? 'number-first' : 'letter-first';
+    // Reset filter and fluorophore dropdowns to default ("all")
+    const statusFilter = document.getElementById('filterStatus');
+    if (statusFilter) statusFilter.value = 'all';
+    const fluorophoreFilter = document.getElementById('fluorophoreFilter');
+    if (fluorophoreFilter) fluorophoreFilter.value = 'all';
+    currentFilterMode = 'all';
+    currentFluorophore = 'all';
+    // Re-populate well selector and table with all wells
+    if (typeof populateWellSelector === 'function' && analysisResults && analysisResults.individual_results) {
+        populateWellSelector(analysisResults.individual_results);
+    }
+    if (typeof populateResultsTable === 'function' && analysisResults && analysisResults.individual_results) {
+        populateResultsTable(analysisResults.individual_results);
+    }
+    // Update toggle button label/indicator
+    const btn = document.getElementById('wellSortToggleBtn');
+    if (btn) {
+        btn.textContent = (wellSortMode === 'letter-first') ? 'Sort: A1, A2, ... (Click to Number-First)' : 'Sort: A1, B1, ... (Click to Letter-First)';
+    }
+    // Set well selector to ALL_WELLS and trigger change
+    const wellSelector = document.getElementById('wellSelect');
+    if (wellSelector) {
+        wellSelector.value = 'ALL_WELLS';
+        if (typeof handleWellChange === 'function') {
+            handleWellChange({ target: wellSelector });
+        }
+    }
+}
+
+function getWellSortKey(well) {
+    // Accepts well string like "A1", "B12", etc.
+    // Returns [row, col] as [letter, number]
+    const match = String(well).match(/^([A-Za-z]+)(\d+)$/);
+    if (!match) return [well, 0];
+    return [match[1].toUpperCase(), parseInt(match[2], 10)];
+}
+
+function getWellSortComparator(mode) {
+    // Returns a comparator for Object.entries(...)
+    return function([wellA], [wellB]) {
+        const [rowA, colA] = getWellSortKey(wellA);
+        const [rowB, colB] = getWellSortKey(wellB);
+        if (mode === 'letter-first') {
+            // A1, A2, ..., B1, B2, ...
+            if (rowA !== rowB) return rowA.localeCompare(rowB);
+            return colA - colB;
+        } else {
+            // number-first: A1, B1, C1, ..., A2, B2, ...
+            if (colA !== colB) return colA - colB;
+            return rowA.localeCompare(rowB);
+        }
+    };
+}
+console.log('[Cq AGGRESSIVE DEBUG - SCRIPT LOAD] script.js is loaded and running!');
 console.log('[DEBUG] script.js loaded - version 20250628a');
 // Global error handler for all uncaught errors
 window.addEventListener('error', function(event) {
     console.error('[GLOBAL ERROR]', event.message, event.filename, event.lineno, event.colno, event.error && event.error.stack);
 });
+
 window.addEventListener('unhandledrejection', function(event) {
     console.error('[GLOBAL PROMISE REJECTION]', event.reason);
 });
@@ -254,6 +357,7 @@ function handleFileUpload(file, type = 'amplification') {
                         }
                     }
                     
+                    console.log('[Cq AGGRESSIVE DEBUG] samplesData is being set from summary file upload:', file.name, results.data);
                     samplesData = {
                         data: results.data,
                         file: file,
@@ -429,6 +533,10 @@ function updateFileInfoDisplay() {
 
 // Analysis functions
 async function performAnalysis() {
+    console.log('[Cq AGGRESSIVE DEBUG] performAnalysis ENTRY. samplesData:', samplesData);
+    setTimeout(() => {
+        console.log('[Cq AGGRESSIVE DEBUG] performAnalysis POST-ENTRY, window.amplificationFiles:', window.amplificationFiles, 'window.samplesData:', window.samplesData);
+    }, 1000);
     if (Object.keys(amplificationFiles).length === 0) {
         alert('Please upload at least one amplification CSV file (Cy5, FAM, HEX, or Texas Red)');
         return;
@@ -443,78 +551,79 @@ async function performAnalysis() {
     if (loadingIndicator) loadingIndicator.style.display = 'flex';
 
     try {
-        // Analyze ALL uploaded fluorophores
+        // Analyze ALL uploaded fluorophores in two batches (stop-and-wait)
         const allResults = {};
         const fluorophores = Object.keys(amplificationFiles);
-        
-        for (const fluorophore of fluorophores) {
-            console.log(`Analyzing ${fluorophore}...`);
-            
-            const selectedFile = amplificationFiles[fluorophore];
-            const analysisData = prepareAnalysisData(selectedFile.data);
-            
-            // Validate we have data to analyze
-            if (!analysisData || Object.keys(analysisData).length === 0) {
-                console.warn(`No valid well data found for ${fluorophore}`);
-                continue;
-            }
-            
-            console.log('Sending analysis data for', fluorophore, ':', analysisData);
-            
-            // Prepare request payload with samples data for SQL integration
-            const requestPayload = {
-                analysis_data: analysisData,
-                samples_data: null
-            };
-            
-            // Include samples data for SQL integration if available
-            if (samplesData) {
-                // Convert samples data to CSV string for backend processing
-                let samplesCSV = '';
-                if (typeof samplesData === 'string') {
-                    samplesCSV = samplesData;
-                } else if (samplesData.data) {
-                    // Convert Papa Parse object back to CSV
-                    samplesCSV = Papa.unparse(samplesData.data);
-                }
-                
-                if (samplesCSV) {
-                    requestPayload.samples_data = samplesCSV;
-                    console.log(`Including samples data for SQL integration (${samplesCSV.length} chars)`);
-                }
-            }
-            
-            // Send to backend for analysis
-            const response = await fetch('/analyze', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Filename': selectedFile.fileName,
-                    'X-Fluorophore': fluorophore
-                },
-                body: JSON.stringify(requestPayload)
-            });
+        if (fluorophores.length === 0) throw new Error('No fluorophores to analyze.');
 
-            if (!response.ok) {
-                const errorData = await response.json();
-                console.error('Server error response:', errorData);
-                throw new Error(errorData.error || `Server error: ${response.status}`);
-            }
+        // Split into two batches
+        const midpoint = Math.ceil(fluorophores.length / 2);
+        const batch1 = fluorophores.slice(0, midpoint);
+        const batch2 = fluorophores.slice(midpoint);
 
-            let results;
-            try {
-                const responseText = await response.text();
-                console.log(`Raw response for ${fluorophore}:`, responseText.substring(0, 500) + '...');
-                results = JSON.parse(responseText);
-                console.log(`Analysis results for ${fluorophore}:`, results);
-                
-                // Store results for this fluorophore
-                allResults[fluorophore] = results;
-                
-            } catch (parseError) {
-                console.error('JSON parsing error:', parseError);
-                throw new Error('Failed to parse server response: ' + parseError.message);
+        async function analyzeBatch(batch) {
+            for (const fluorophore of batch) {
+                console.log(`[BATCH ANALYSIS] Analyzing ${fluorophore}...`);
+                const selectedFile = amplificationFiles[fluorophore];
+                if (selectedFile && selectedFile.data) {
+                    console.log(`[Cq AGGRESSIVE DEBUG] selectedFile.data first 5 rows:`, selectedFile.data.slice(0,5));
+                }
+                const analysisData = prepareAnalysisData(selectedFile.data);
+                if (!analysisData || Object.keys(analysisData).length === 0) {
+                    console.warn(`[Cq AGGRESSIVE DEBUG] No valid well data found for ${fluorophore}`);
+                    continue;
+                }
+                const requestPayload = {
+                    analysis_data: analysisData,
+                    samples_data: null
+                };
+                if (samplesData) {
+                    let samplesCSV = '';
+                    if (typeof samplesData === 'string') {
+                        samplesCSV = samplesData;
+                    } else if (samplesData.data) {
+                        samplesCSV = Papa.unparse(samplesData.data);
+                    }
+                    if (samplesCSV) {
+                        requestPayload.samples_data = samplesCSV;
+                        console.log(`Including samples data for SQL integration (${samplesCSV.length} chars)`);
+                    }
+                }
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Filename': selectedFile.fileName,
+                        'X-Fluorophore': fluorophore
+                    },
+                    body: JSON.stringify(requestPayload)
+                });
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    console.error('Server error response:', errorData);
+                    throw new Error(errorData.error || `Server error: ${response.status}`);
+                }
+                let results;
+                try {
+                    const responseText = await response.text();
+                    console.log(`Raw response for ${fluorophore}:`, responseText.substring(0, 500) + '...');
+                    results = JSON.parse(responseText);
+                    console.log(`Analysis results for ${fluorophore}:`, results);
+                    allResults[fluorophore] = results;
+                } catch (parseError) {
+                    console.error('JSON parsing error:', parseError);
+                    throw new Error('Failed to parse server response: ' + parseError.message);
+                }
             }
+        }
+
+        // Run first batch
+        await analyzeBatch(batch1);
+        // Pause before second batch if there is one
+        if (batch2.length > 0) {
+            console.log('[BATCH ANALYSIS] Pausing 3 seconds before next batch...');
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            await analyzeBatch(batch2);
         }
         
         // DEBUG: Check fluorophore count decision
@@ -599,25 +708,68 @@ async function performAnalysis() {
     }
 }
 
+// --- AJAX Control Grid Refactor ---
+// Helper: fetch and display control grids via AJAX, with debug and guard
+/**
+ * CHANGE LOG ENTRY (2025-06-28):
+ * Robustified fetchAndDisplayControlGrids to ensure control grid is only fetched after analysis data is ready.
+ * Added retry logic and detailed debug logs for easier rollback and troubleshooting.
+ * All changes are clearly marked for future reference.
+ */
+async function fetchAndDisplayControlGrids(organizedControlSets, testCode, attempt = 1) {
+    if (window.isAwaitingSessionReload) {
+        console.log(`[CONTROL GRID AJAX GUARD] Skipping AJAX control grid fetch due to pending session reload. [attempt ${attempt}]`);
+        return;
+    }
+    // Ensure analysis results are available before fetching control grid
+    if (!window.currentAnalysisResults || Object.keys(window.currentAnalysisResults).length === 0) {
+        if (attempt <= 5) {
+            console.log(`[CONTROL GRID AJAX RETRY] Analysis results not ready, retrying in 300ms... [attempt ${attempt}]`);
+            setTimeout(() => fetchAndDisplayControlGrids(organizedControlSets, testCode, attempt + 1), 300);
+        } else {
+            console.warn('[CONTROL GRID AJAX RETRY] Max retries reached. Control grid fetch aborted.');
+        }
+        return;
+    }
+    // CHANGE LOG ENTRY (2025-06-28):
+    // Fixed AJAX parameter from testCode to pattern to match backend expectation.
+    // Added extra logging for backend response and error.
+    const pattern = testCode; // If testCode is not the pattern, replace this with the correct pattern variable.
+    console.log(`[CONTROL GRID AJAX] Fetching control grid data for pattern:`, pattern, organizedControlSets, `[attempt ${attempt}]`);
+    try {
+        const response = await fetch(`/control-grids?pattern=${encodeURIComponent(pattern)}`);
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.warn('[CONTROL GRID AJAX] Failed to fetch control grid data:', response.status, errorText);
+            return;
+        }
+        const gridData = await response.json();
+        console.log('[CONTROL GRID AJAX] Received control grid data:', gridData);
+        // Now display the grids (replace/createPathogenSpecificGrids as needed)
+        if (typeof createPathogenSpecificGrids === 'function') {
+            createPathogenSpecificGrids(gridData);
+        }
+    } catch (err) {
+        console.error('[CONTROL GRID AJAX] Error fetching control grid data:', err);
+    }
+}
+
 // Display functions
 async function displayAnalysisResults(results) {
     console.log('Displaying analysis results:', results);
-    
     if (!results || !results.individual_results) {
         console.error('Invalid results structure:', results);
         alert('Error: Invalid analysis results received');
         return;
     }
-    
     const analysisSection = document.getElementById('analysisSection');
     if (analysisSection) {
         analysisSection.style.display = 'block';
     }
-    
     // Handle different response structures
     const individualResults = results.individual_results || {};
+    propagateThresholdsToWells(individualResults);
     const cycleInfo = results.cycle_info || results.summary?.cycle_info;
-    
     // Calculate statistics separated by patient samples and controls
     const fluorophoreStats = calculateFluorophoreStats(individualResults);
     const totalWells = Object.keys(individualResults).length;
@@ -625,23 +777,18 @@ async function displayAnalysisResults(results) {
     const controls = fluorophoreStats.controls;
     const patientPositivePercentage = patientSamples.total > 0 ? ((patientSamples.positive / patientSamples.total) * 100).toFixed(1) : 0;
     const controlPositivePercentage = controls.total > 0 ? ((controls.positive / controls.total) * 100).toFixed(1) : 0;
-    
     // Get experiment pattern name
     const experimentPattern = getCurrentFullPattern();
-    
     // Update summary statistics with separated patient and control data
     const experimentPatternEl = document.getElementById('experimentPattern');
     const totalPositiveEl = document.getElementById('totalPositive');
     const positivePercentageEl = document.getElementById('positivePercentage');
     const cycleRangeEl = document.getElementById('cycleRangeResult');
-    
     if (experimentPatternEl) experimentPatternEl.textContent = experimentPattern;
     if (totalPositiveEl) totalPositiveEl.textContent = patientSamples.total;
     if (positivePercentageEl) positivePercentageEl.textContent = `${patientSamples.positive} ${patientPositivePercentage}%`;
-    
     // Update control statistics if controls exist
     updateControlStatistics(controls, controlPositivePercentage);
-    
     // Update cycle range
     if (cycleInfo && cycleRangeEl) {
         cycleRangeEl.textContent = `${cycleInfo.min} - ${cycleInfo.max} (${cycleInfo.count} cycles)`;
@@ -654,58 +801,44 @@ async function displayAnalysisResults(results) {
             cycleRangeEl.textContent = 'N/A';
         }
     }
-    
     // Display fluorophore-specific breakdown using patient samples only
     displayFluorophoreBreakdown(fluorophoreStats.byFluorophore, patientSamples, controls);
-    
     // Update wells analysis title with experiment name
     const wellsTitle = document.getElementById('wellsAnalysisTitle');
     if (wellsTitle) {
         wellsTitle.textContent = `${experimentPattern} - All Wells Analysis`;
     }
-    
     // Always add fluorophore filter for context, even with single fluorophore
     addFluorophoreFilter(individualResults);
-    
     // Validate controls and display alerts if needed
     const controlIssues = validateControls(individualResults);
     displayControlValidationAlerts(controlIssues);
-    
-    // Create pathogen grids for fresh single-fluorophore uploads
+    // --- Ensure analysis results are available before grid fetch ---
+    window.currentAnalysisResults = results;
+    console.log('[CONTROL GRID PATCH] Set window.currentAnalysisResults before grid fetch:', window.currentAnalysisResults);
+    // --- Refactored: AJAX control grid fetch only if not awaiting reload ---
     const testCode = extractTestCode(experimentPattern);
-    console.log('🔍 PATHOGEN GRIDS - Creating grids for fresh single-fluorophore upload:', testCode);
-    
-    // Extract control data from the fresh results
     const wellResultsArray = Object.values(individualResults);
     const { controlsByChannel } = extractRealControlCoordinates(wellResultsArray, experimentPattern);
     const organizedControlSets = organizeControlsIntoSets(controlsByChannel);
-    
-    console.log('🔍 PATHOGEN GRIDS - Extracted control sets for fresh upload:', Object.keys(organizedControlSets));
-    
-    // Create pathogen-specific tabbed grids (same as history loading)
-    createPathogenSpecificGrids(organizedControlSets);
-    
+    // Use the full experimentPattern for control grid AJAX, not just testCode
+    console.log('[CONTROL GRID PATCH] Calling fetchAndDisplayControlGrids with pattern:', experimentPattern, '| testCode:', testCode);
+    await fetchAndDisplayControlGrids(organizedControlSets, experimentPattern);
     populateWellSelector(individualResults);
     populateResultsTable(individualResults);
-    
     // Show first well by default
     const firstWell = Object.keys(individualResults)[0];
     if (firstWell) {
         showWellDetails(firstWell);
     }
-    
     // Mark this as fresh analysis to ensure validation display shows
     currentAnalysisResults.freshAnalysis = true;
-    
     // Update pathogen channel validation status for fresh analysis
     await updatePathogenChannelStatusInBreakdown();
-    
-    // Show manual pathogen grids button
-    const pathogenGridsManual = document.getElementById('pathogenGridsManual');
-    if (pathogenGridsManual) {
-        pathogenGridsManual.style.display = 'block';
+    // Only scroll to analysis section if user is near the top
+    if (window.scrollY < 200) {
+        document.getElementById('analysisSection').scrollIntoView({ behavior: 'smooth' });
     }
-    
     document.getElementById('analysisSection').scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -725,7 +858,30 @@ async function displayMultiFluorophoreResults(results) {
     
     // Calculate statistics separated by patient samples and controls
     const individualResults = results.individual_results;
+    propagateThresholdsToWells(individualResults);
     const fluorophoreStats = calculateFluorophoreStats(individualResults);
+// Utility: Propagate threshold_value per fluorophore to all wells, with debug logging
+function propagateThresholdsToWells(individualResults) {
+    if (!individualResults || typeof individualResults !== 'object') return;
+    const fluorThresholds = {};
+    Object.values(individualResults).forEach(well => {
+        if (well && well.fluorophore && typeof well.threshold_value === 'number') {
+            fluorThresholds[well.fluorophore] = well.threshold_value;
+        }
+    });
+    Object.values(individualResults).forEach(well => {
+        if (well && well.fluorophore && fluorThresholds[well.fluorophore] !== undefined) {
+            well.threshold_value = fluorThresholds[well.fluorophore];
+        }
+    });
+    // Aggressive debug log
+    const missing = Object.entries(individualResults).filter(([k, w]) => typeof w.threshold_value !== 'number');
+    if (missing.length > 0) {
+        console.warn('[THRESHOLD PROPAGATION] Some wells missing threshold_value after propagation:', missing.map(([k]) => k));
+    } else {
+        console.log('[THRESHOLD PROPAGATION] All wells have threshold_value.');
+    }
+}
     const totalWells = Object.keys(individualResults).length;
     const patientSamples = fluorophoreStats.patientSamples;
     const controls = fluorophoreStats.controls;
@@ -870,28 +1026,31 @@ async function displayMultiFluorophoreResults(results) {
 async function saveCombinedSessionToDatabase(results, experimentPattern) {
     try {
         console.log('Saving combined multi-fluorophore session to database...');
-        
+        // Defensive: deep copy results to avoid mutation by chart/annotation code
+        const resultsCopy = JSON.parse(JSON.stringify(results));
         // Get fluorophores from results
         const fluorophores = [];
-        for (const wellKey in results.individual_results) {
+        console.log('[DEBUG] saveCombinedSessionToDatabase wellKeys:', Object.keys(resultsCopy.individual_results));
+        for (const wellKey in resultsCopy.individual_results) {
             const fluorophore = extractFluorophoreFromWellId(wellKey);
+            const wellObj = resultsCopy.individual_results[wellKey];
+            console.log(`[DEBUG] WellKey: ${wellKey}, extracted fluor: ${fluorophore}, wellObj.fluorophore: ${wellObj && wellObj.fluorophore}`);
             if (fluorophore && !fluorophores.includes(fluorophore)) {
                 fluorophores.push(fluorophore);
+            } else if (wellObj && wellObj.fluorophore && !fluorophores.includes(wellObj.fluorophore)) {
+                fluorophores.push(wellObj.fluorophore);
             }
         }
-        
         // Only save multi-fluorophore session if we have data from multiple fluorophores
         if (fluorophores.length < 2) {
-            console.log('Skipping combined session save - only single fluorophore detected');
+            console.log('[DEBUG] Not enough fluorophores to save combined session. fluorophores:', fluorophores);
             return;
         }
-        
         const sessionData = {
             filename: `Multi-Fluorophore_${experimentPattern}`,
-            combined_results: results,
+            combined_results: resultsCopy,
             fluorophores: fluorophores
         };
-        
         const response = await fetch('/sessions/save-combined', {
             method: 'POST',
             headers: {
@@ -899,7 +1058,6 @@ async function saveCombinedSessionToDatabase(results, experimentPattern) {
             },
             body: JSON.stringify(sessionData)
         });
-        
         if (response.ok) {
             const result = await response.json();
             console.log('Combined session saved successfully:', result.session_id);
@@ -1084,124 +1242,140 @@ function populateResultsTable(individualResults) {
             console.error('Results table body not found');
             return;
         }
-        
+
+        // --- Add sort toggle button if not present ---
+        let sortToggleBtn = document.getElementById('wellSortToggleBtn');
+        if (!sortToggleBtn) {
+            // Insert into .table-controls if present
+            const controlsRow = document.querySelector('.table-controls');
+            if (controlsRow) {
+                sortToggleBtn = document.createElement('button');
+                sortToggleBtn.id = 'wellSortToggleBtn';
+                sortToggleBtn.className = 'btn btn-secondary';
+                sortToggleBtn.style.marginRight = '10px';
+                sortToggleBtn.onclick = toggleWellSortMode;
+                sortToggleBtn.textContent = (wellSortMode === 'letter-first') ? 'Sort: A1, A2, ... (Click to Number-First)' : 'Sort: A1, B1, ... (Click to Letter-First)';
+                controlsRow.insertBefore(sortToggleBtn, controlsRow.firstChild);
+            }
+        } else {
+            sortToggleBtn.textContent = (wellSortMode === 'letter-first') ? 'Sort: A1, A2, ... (Click to Number-First)' : 'Sort: A1, B1, ... (Click to Letter-First)';
+        }
+
         tableBody.innerHTML = '';
-        
-        Object.entries(individualResults).forEach(([wellKey, result]) => {
-        const row = document.createElement('tr');
-        row.setAttribute('data-well-key', wellKey); // Store actual wellKey for modal navigation
-        
-        // Existing quality badge
-        const statusClass = result.is_good_scurve ? 'status-good' : 'status-poor';
-        const statusText = result.is_good_scurve ? 'Good S-Curve' : 'Poor Fit';
-        
-        // New stricter criteria badges
-        let strictBadgeClass = '';
-        let strictBadgeText = '';
-        
-        const r2Score = result.r2_score || 0;
-        const steepness = result.steepness || 0;
-        const amplitude = result.amplitude || 0;
-        
-        // Apply strict criteria using amplitude thresholds AND anomaly check
-        try {
-            // First get anomalies data
-            let hasAnomalies = false;
+
+        // --- Sort wells according to current mode ---
+        const sortedEntries = Object.entries(individualResults).sort(getWellSortComparator(wellSortMode));
+
+        sortedEntries.forEach(([wellKey, result]) => {
+            const row = document.createElement('tr');
+            row.setAttribute('data-well-key', wellKey); // Store actual wellKey for modal navigation
+
+            // Existing quality badge
+            const statusClass = result.is_good_scurve ? 'status-good' : 'status-poor';
+            const statusText = result.is_good_scurve ? 'Good S-Curve' : 'Poor Fit';
+
+            // New stricter criteria badges
+            let strictBadgeClass = '';
+            let strictBadgeText = '';
+
+            const r2Score = result.r2_score || 0;
+            const steepness = result.steepness || 0;
+            const amplitude = result.amplitude || 0;
+
+            // Apply strict criteria using amplitude thresholds AND anomaly check
+            try {
+                // First get anomalies data
+                let hasAnomalies = false;
+                if (result.anomalies) {
+                    try {
+                        const anomalies = typeof result.anomalies === 'string' ? 
+                            JSON.parse(result.anomalies) : result.anomalies;
+                        hasAnomalies = Array.isArray(anomalies) && anomalies.length > 0 && 
+                                    !(anomalies.length === 1 && anomalies[0] === 'None');
+                    } catch (e) {
+                        hasAnomalies = true; // If can't parse, assume there are anomalies
+                    }
+                }
+
+                // Apply enhanced criteria: POS requires good S-curve + amplitude > 500 + no anomalies
+                const isGoodSCurve = result.is_good_scurve || false;
+                if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
+                    strictBadgeClass = 'strict-pos';
+                    strictBadgeText = 'POS';
+                } else if (amplitude < 400) {
+                    strictBadgeClass = 'strict-neg';
+                    strictBadgeText = 'NEG';
+                } else {
+                    // REDO: poor curves, amplitude 400-500, OR amplitude > 500 with anomalies
+                    strictBadgeClass = 'strict-redo';
+                    strictBadgeText = 'REDO';
+                }
+            } catch (e) {
+                console.error('Error applying strict criteria:', e.message);
+                strictBadgeClass = 'strict-redo';
+                strictBadgeText = 'REDO';
+            }
+
+            // Handle anomalies data properly
+            let anomaliesText = 'None';
             if (result.anomalies) {
                 try {
                     const anomalies = typeof result.anomalies === 'string' ? 
                         JSON.parse(result.anomalies) : result.anomalies;
-                    hasAnomalies = Array.isArray(anomalies) && anomalies.length > 0 && 
-                                  !(anomalies.length === 1 && anomalies[0] === 'None');
+                    anomaliesText = Array.isArray(anomalies) && anomalies.length > 0 ? 
+                        anomalies.join(', ') : 'None';
                 } catch (e) {
-                    hasAnomalies = true; // If can't parse, assume there are anomalies
+                    anomaliesText = 'Parse Error';
                 }
             }
-            
-            // Apply enhanced criteria: POS requires good S-curve + amplitude > 500 + no anomalies
-            const isGoodSCurve = result.is_good_scurve || false;
-            if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
-                strictBadgeClass = 'strict-pos';
-                strictBadgeText = 'POS';
-            } else if (amplitude < 400) {
-                strictBadgeClass = 'strict-neg';
-                strictBadgeText = 'NEG';
-            } else {
-                // REDO: poor curves, amplitude 400-500, OR amplitude > 500 with anomalies
-                strictBadgeClass = 'strict-redo';
-                strictBadgeText = 'REDO';
-            }
-        } catch (e) {
-            console.error('Error applying strict criteria:', e.message);
-            strictBadgeClass = 'strict-redo';
-            strictBadgeText = 'REDO';
-        }
-        
-        // Handle anomalies data properly
-        let anomaliesText = 'None';
-        if (result.anomalies) {
-            try {
-                const anomalies = typeof result.anomalies === 'string' ? 
-                    JSON.parse(result.anomalies) : result.anomalies;
-                anomaliesText = Array.isArray(anomalies) && anomalies.length > 0 ? 
-                    anomalies.join(', ') : 'None';
-            } catch (e) {
-                anomaliesText = 'Parse Error';
-            }
-        }
-        
-        let wellId = result.well_id || wellKey.split('_')[0];
-        const fluorophore = result.fluorophore || 'Unknown';
-        const sampleName = result.sample || result.sample_name || 'N/A';
-        
-        // Debug sample name for troubleshooting
-        if (wellKey.includes('A1')) {
-            console.log(`Sample debug for ${wellKey}:`, {
-                sample: result.sample,
-                sample_name: result.sample_name,
-                final: sampleName
-            });
-        }
-        const cqValue = result.cq_value !== null && result.cq_value !== undefined ? 
-            result.cq_value.toFixed(2) : 'N/A';
-        
-        // Only show strict badge if criteria are met
-        const strictBadgeHTML = strictBadgeText ? 
-            `<span class="strict-badge ${strictBadgeClass}">${strictBadgeText}</span>` : 
-            '-';
 
-        row.innerHTML = `
-            <td><strong>${wellId}</strong></td>
-            <td>${sampleName}</td>
-            <td><span class="fluorophore-tag fluorophore-${fluorophore.toLowerCase()}">${fluorophore}</span></td>
-            <td>${strictBadgeHTML}</td>
-            <td><span class="status ${statusClass}">${statusText}</span></td>
-            <td>${result.r2_score ? result.r2_score.toFixed(4) : 'N/A'}</td>
-            <td>${result.rmse ? result.rmse.toFixed(2) : 'N/A'}</td>
-            <td>${result.amplitude ? result.amplitude.toFixed(1) : 'N/A'}</td>
-            <td>${result.steepness ? result.steepness.toFixed(3) : 'N/A'}</td>
-            <td>${result.midpoint ? result.midpoint.toFixed(1) : 'N/A'}</td>
-            <td>${result.baseline ? result.baseline.toFixed(1) : 'N/A'}</td>
-            <td>${cqValue}</td>
-            <td>${anomaliesText}</td>
-        `;
-        
-        row.addEventListener('click', () => {
-            const wellSelect = document.getElementById('wellSelect');
-            if (wellSelect) {
-                wellSelect.value = wellKey;
-            }
-            showWellModal(wellKey);
+            let wellId = result.well_id || wellKey.split('_')[0];
+            const fluorophore = result.fluorophore || 'Unknown';
+            const sampleName = result.sample || result.sample_name || 'N/A';
+
+            // Debug Cq value, wellKey, sampleName, and result object for troubleshooting
+            console.log(`[Cq DEBUG] WellKey: ${wellKey}, WellId: ${wellId}, Sample: ${sampleName}, Cq:`, result.cq_value, 'Result:', result);
+
+            const cqValue = (result.cq_value !== null && result.cq_value !== undefined && !isNaN(result.cq_value))
+                ? Number(result.cq_value).toFixed(2)
+                : 'N/A';
+
+            // Only show strict badge if criteria are met
+            const strictBadgeHTML = strictBadgeText ? 
+                `<span class="strict-badge ${strictBadgeClass}">${strictBadgeText}</span>` : 
+                '-';
+
+            row.innerHTML = `
+                <td><strong>${wellId}</strong></td>
+                <td>${sampleName}</td>
+                <td><span class="fluorophore-tag fluorophore-${fluorophore.toLowerCase()}">${fluorophore}</span></td>
+                <td>${strictBadgeHTML}</td>
+                <td><span class="status ${statusClass}">${statusText}</span></td>
+                <td>${result.r2_score ? result.r2_score.toFixed(4) : 'N/A'}</td>
+                <td>${result.rmse ? result.rmse.toFixed(2) : 'N/A'}</td>
+                <td>${result.amplitude ? result.amplitude.toFixed(1) : 'N/A'}</td>
+                <td>${result.steepness ? result.steepness.toFixed(3) : 'N/A'}</td>
+                <td>${result.midpoint ? result.midpoint.toFixed(1) : 'N/A'}</td>
+                <td>${result.baseline ? result.baseline.toFixed(1) : 'N/A'}</td>
+                <td>${cqValue}</td>
+                <td>${anomaliesText}</td>
+            `;
+
+            row.addEventListener('click', () => {
+                const wellSelect = document.getElementById('wellSelect');
+                if (wellSelect) {
+                    wellSelect.value = wellKey;
+                }
+                showWellModal(wellKey);
+            });
+
+            tableBody.appendChild(row);
         });
-        
-        tableBody.appendChild(row);
-    });
-    
 
     } catch (mainError) {
         console.error('Error in populateResultsTable function:', mainError.message);
         console.error('Stack trace:', mainError.stack);
-        
+
         // Still try to populate basic table without advanced features
         const tableBody = document.getElementById('resultsTableBody');
         if (tableBody) {
@@ -1215,6 +1389,8 @@ function showWellDetails(wellKey) {
         console.error('No analysis results available');
         return;
     }
+    // Guarantee threshold propagation before chart rendering
+    propagateThresholdsToWells(currentAnalysisResults.individual_results);
     const wellResult = currentAnalysisResults.individual_results[wellKey];
     if (!wellResult) {
         console.error('Well result not found:', wellKey);
@@ -1424,10 +1600,9 @@ function generateFilteredSamplesHtml(effectiveFilterMode = null) {
 function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null) {
     // Use currentAnalysisResults for global access
     if (!currentAnalysisResults || !currentAnalysisResults.individual_results) return;
-    
+
     const wellResult = wellData || currentAnalysisResults.individual_results[wellKey];
     if (!wellResult) return;
-    
     let wellId = wellResult.well_id || wellKey.split('_')[0];
     const fluorophore = wellResult.fluorophore || 'Unknown';
     
@@ -1535,12 +1710,12 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
         });
     }
     
-    // Add threshold line for this well/fluorophore if available, or for all fluorophores if selected
+    // --- Robust threshold line rendering for all runs ---
     let annotationPlugin = {};
     console.log('[DEBUG] wellResult before threshold access:', wellResult);
     let threshold = (wellResult && typeof wellResult.threshold_value === 'number') ? wellResult.threshold_value : undefined;
-    // If a specific fluorophore is selected, show its threshold if available
     if (threshold !== undefined) {
+        // Draw a prominent threshold line
         annotationPlugin = {
             annotation: {
                 annotations: {
@@ -1548,17 +1723,24 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
                         type: 'line',
                         yMin: threshold,
                         yMax: threshold,
-                        borderColor: 'orange',
-                        borderWidth: 2,
+                        borderColor: 'rgba(231, 76, 60, 0.95)',
+                        borderWidth: 3,
+                        borderDash: [6, 6],
                         label: {
-                            content: 'Threshold',
-                            enabled: true,
-                            position: 'end'
-                        }
+                            display: true,
+                            content: `Threshold (${threshold})`,
+                            position: 'end',
+                            backgroundColor: 'rgba(231,76,60,0.85)',
+                            color: '#fff',
+                            font: { weight: 'bold', size: 13 },
+                            padding: 6
+                        },
+                        z: 100
                     }
                 }
             }
         };
+        console.log(`[DEBUG] Drawing threshold line at y=${threshold} for well ${wellId}`);
     } else if (currentAnalysisResults && currentAnalysisResults.individual_results) {
         // If "all" is selected, show all available threshold lines
         const allThresholds = {};
@@ -1569,12 +1751,18 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
                     yMin: res.threshold_value,
                     yMax: res.threshold_value,
                     borderColor: getFluorophoreColor(res.fluorophore),
-                    borderWidth: 2,
+                    borderWidth: 3,
+                    borderDash: [6, 6],
                     label: {
-                        content: `Threshold (${res.fluorophore})`,
-                        enabled: true,
-                        position: 'end'
-                    }
+                        display: true,
+                        content: `Threshold (${res.fluorophore}: ${res.threshold_value})`,
+                        position: 'end',
+                        backgroundColor: getFluorophoreColor(res.fluorophore, 0.2),
+                        color: getFluorophoreColor(res.fluorophore),
+                        font: { weight: 'bold', size: 13 },
+                        padding: 6
+                    },
+                    z: 100
                 };
             }
         });
@@ -1584,7 +1772,18 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
                     annotations: allThresholds
                 }
             };
+            console.log('[DEBUG] Drawing all available threshold lines:', allThresholds);
+        } else {
+            console.warn(`[DEBUG] No threshold_value found for any fluorophore in this session. Well: ${wellId} (${fluorophore})`);
         }
+    } else {
+        // No threshold found for this well
+        console.warn(`[DEBUG] No threshold_value found for well ${wellId} (${fluorophore}). wellResult:`, wellResult);
+        annotationPlugin = {
+            annotation: {
+                annotations: {}
+            }
+        };
     }
 
     window.amplificationChart = new Chart(ctx, {
@@ -1700,6 +1899,9 @@ function prepareAnalysisData(data = null) {
     // Integrate sample names and Cq values
     console.log('=== INTEGRATING SAMPLE DATA ===');
     const cqData = parseCqData();
+    if (!cqData || Object.keys(cqData).length === 0) {
+        console.log('[Cq AGGRESSIVE DEBUG] parseCqData returned empty object! samplesData:', samplesData);
+    }
     const sampleNames = parseSampleNames();
     
     console.log('Available sample names keys:', Object.keys(sampleNames).slice(0, 10));
@@ -1708,43 +1910,39 @@ function prepareAnalysisData(data = null) {
     
     // Add sample names and Cq values to well data
     Object.keys(wellData).forEach(wellKey => {
-        // Extract base well ID from fluorophore-tagged key (A1_Cy5 -> A1)
-        const baseWellId = wellKey.split('_')[0];
-        
+        // Extract base well ID and fluorophore from wellKey (A1_Cy5 -> A1, Cy5)
+        const [baseWellId, fluor] = wellKey.split('_');
         const sampleName = sampleNames[baseWellId] || 'Unknown';
-        const cqValue = cqData[baseWellId] || null;
-        
+        // Try all possible key combinations for Cq lookup
+        let cqValue = null;
+        if (cqData[wellKey] !== undefined && cqData[wellKey] !== null) {
+            cqValue = cqData[wellKey];
+        } else if (cqData[baseWellId + '_' + fluor] !== undefined && cqData[baseWellId + '_' + fluor] !== null) {
+            cqValue = cqData[baseWellId + '_' + fluor];
+        } else if (cqData[baseWellId] !== undefined && cqData[baseWellId] !== null) {
+            cqValue = cqData[baseWellId];
+        }
         wellData[wellKey].sample_name = sampleName;
         wellData[wellKey].cq_value = cqValue;
-        
-        // Debug first few wells
-        if (['A1_Cy5', 'A2_Cy5', 'A3_Cy5'].includes(wellKey)) {
-            console.log(`Well ${wellKey} integration:`, {
-                baseWellId: baseWellId,
-                availableInSamples: baseWellId in sampleNames,
-                sampleFromParsing: sampleNames[baseWellId],
-                finalSample: sampleName,
-                availableInCq: baseWellId in cqData,
-                cqFromParsing: cqData[baseWellId],
-                finalCq: cqValue
-            });
-        }
+
+        // Debug every well's Cq mapping for troubleshooting
+        console.log(`[Cq MERGE DEBUG] WellKey: ${wellKey}, BaseWellId: ${baseWellId}, Fluor: ${fluor}, SampleName: ${sampleName}, cqData[wellKey]:`, cqData[wellKey], ', cqData[baseWellId+_+fluor]:', cqData[baseWellId + '_' + fluor], ', cqData[baseWellId]:', cqData[baseWellId], ', Final Cq:', cqValue, ', Available Cq keys:', Object.keys(cqData));
     });
-    
+
     console.log(`Prepared analysis data for ${Object.keys(wellData).length} wells`);
     return wellData;
 }
 
 function parseCqData(specificFluorophore = null) {
-    console.log('=== PARSING CQ DATA ===');
-    console.log('samplesData exists:', !!samplesData);
-    console.log('specificFluorophore filter:', specificFluorophore);
+    console.log('[Cq AGGRESSIVE DEBUG - TOP OF FUNCTION] parseCqData ENTRY! samplesData:', samplesData, 'typeof:', typeof samplesData, 'specificFluorophore:', specificFluorophore);
+    // === PARSING CQ DATA ===
+    console.log('[Cq DEBUG] parseCqData called!');
     
     if (!samplesData) {
         console.log('No samples data available for Cq parsing');
         return {};
     }
-    
+
     // Handle both string and parsed data
     let data;
     if (typeof samplesData === 'string') {
@@ -1756,20 +1954,20 @@ function parseCqData(specificFluorophore = null) {
         console.log('Unknown samplesData format');
         return {};
     }
-    
-    console.log('Parsed Cq CSV rows:', data.length);
-    console.log('First row (headers):', data[0]);
-    
+
+    // Aggressive debug: print first 10 rows of data
+    console.log('[Cq AGGRESSIVE DEBUG] First 10 rows of parsed Cq data:', data.slice(0, 10));
+
     if (data.length < 2) {
         console.log('Not enough data rows for Cq parsing');
         return {};
     }
-    
+
     const cqDataResults = {};
     let wellColumnIndex = -1;
     let fluorColumnIndex = -1;
     let cqColumnIndex = -1;
-    
+
     // Find Well, Fluorophore, and Cq columns
     for (let colIndex = 0; colIndex < data[0].length; colIndex++) {
         const header = data[0][colIndex];
@@ -1784,43 +1982,65 @@ function parseCqData(specificFluorophore = null) {
             }
         }
     }
-    
+
     // Use fixed indices for CFX Manager format if not found by header
     if (wellColumnIndex === -1 && data[0].length > 1) wellColumnIndex = 1;
     if (fluorColumnIndex === -1 && data[0].length > 2) fluorColumnIndex = 2;
     if (cqColumnIndex === -1 && data[0].length > 6) cqColumnIndex = 6;
-    
-    console.log(`Cq parsing: Well=${wellColumnIndex}, Fluor=${fluorColumnIndex}, Cq=${cqColumnIndex}`);
-    
+
+    console.log(`[Cq AGGRESSIVE DEBUG] Cq parsing: Well=${wellColumnIndex}, Fluor=${fluorColumnIndex}, Cq=${cqColumnIndex}`);
+
     if (wellColumnIndex === -1 || fluorColumnIndex === -1 || cqColumnIndex === -1) {
-        console.warn('Could not find required columns in samples data');
+        console.warn('[Cq AGGRESSIVE DEBUG] Could not find required columns in samples data');
         console.log('Available headers:', data[0]);
         return {};
     }
-    
+
     // Extract Cq values with fluorophore filtering
+    let normalizationCodeHit = false;
     for (let rowIndex = 1; rowIndex < data.length; rowIndex++) {
-        const currentWellId = data[rowIndex][wellColumnIndex];
-        const fluorophore = data[rowIndex][fluorColumnIndex];
-        const cqValue = parseFloat(data[rowIndex][cqColumnIndex]);
-        
+        let currentWellId = data[rowIndex][wellColumnIndex];
+        let fluorophore = data[rowIndex][fluorColumnIndex];
+        let rawCq = data[rowIndex][cqColumnIndex];
+        // Log every row processed
+        console.log(`[Cq AGGRESSIVE DEBUG] Row ${rowIndex}: currentWellId='${currentWellId}', fluorophore='${fluorophore}', rawCq='${rawCq}'`);
+        // Normalize Cq value: trim, replace comma with dot, remove extra spaces
+        let normalizedCq = (typeof rawCq === 'string') ? rawCq.trim().replace(',', '.').replace(/[^0-9.eE+-]/g, '') : rawCq;
+        let cqValue = parseFloat(normalizedCq);
+        // Debug normalization
+        if (rowIndex <= 5) {
+            console.log(`[Cq NORMALIZE DEBUG] Row ${rowIndex}: rawCq='${rawCq}', normalizedCq='${normalizedCq}', parsed=${cqValue}`);
+        }
         // Skip if filtering for specific fluorophore and this doesn't match
         if (specificFluorophore && fluorophore !== specificFluorophore) {
+            console.log(`[Cq AGGRESSIVE DEBUG] Row ${rowIndex} skipped due to fluorophore filter: ${fluorophore} !== ${specificFluorophore}`);
             continue;
         }
-        
         if (currentWellId && fluorophore && !isNaN(cqValue)) {
+            normalizationCodeHit = true;
             // Convert A01 format to A1 format to match amplification files
             const convertedWellId = currentWellId.replace(/^([A-P])0(\d)$/, '$1$2');
             const wellKey = specificFluorophore ? convertedWellId : `${convertedWellId}_${fluorophore}`;
             cqDataResults[wellKey] = cqValue;
-            
             if (rowIndex <= 5) { // Debug first few rows
                 console.log(`Cq mapping: ${currentWellId}+${fluorophore} -> ${wellKey} = ${cqValue}`);
             }
+        } else if (currentWellId && fluorophore) {
+            // Log if Cq value is not a valid number
+            if (rowIndex <= 5) {
+                console.warn(`[Cq WARNING] Invalid Cq for ${currentWellId}+${fluorophore}: raw='${rawCq}', normalized='${normalizedCq}'`);
+            }
+        } else {
+            console.log(`[Cq AGGRESSIVE DEBUG] Row ${rowIndex} skipped: currentWellId='${currentWellId}', fluorophore='${fluorophore}', rawCq='${rawCq}'`);
         }
     }
-    
+
+    if (!normalizationCodeHit) {
+        console.warn('[Cq AGGRESSIVE DEBUG] No rows hit the normalization code!');
+    } else {
+        console.log(`[Cq AGGRESSIVE DEBUG] Normalization code was hit for at least one row. Parsed Cq count: ${Object.keys(cqDataResults).length}`);
+    }
+
     return cqDataResults;
 }
 
@@ -2288,7 +2508,10 @@ document.addEventListener('DOMContentLoaded', function() {
     // Analysis button
     const analyzeBtn = document.getElementById('analyzeBtn');
     if (analyzeBtn) {
-        analyzeBtn.addEventListener('click', performAnalysis);
+        analyzeBtn.addEventListener('click', function() {
+            console.log('[Cq AGGRESSIVE DEBUG] analyzeBtn clicked, calling performAnalysis');
+            performAnalysis();
+        });
     }
     
     // Well selector
@@ -3761,7 +3984,7 @@ function displayAnalysisHistory(sessions) {
         <table class="history-table">
             <thead>
                 <tr>
-                    <th>File Name</th>
+                    <th>Experiment Pattern</th>
                     <th>Date</th>
                     <th>Wells</th>
                     <th>Positive Rate</th>
@@ -3770,9 +3993,11 @@ function displayAnalysisHistory(sessions) {
                 </tr>
             </thead>
             <tbody>
-                ${sortedSessions.map(session => `
+                ${sortedSessions.map(session => {
+                    const pattern = extractBasePattern(session.filename || session.display_name || '');
+                    return `
                     <tr data-session-id="${session.id}" class="history-row">
-                        <td><strong><a href="javascript:void(0)" onclick="loadSessionDetails('${session.id}')" class="session-link">${session.display_name || session.filename}</a></strong></td>
+                        <td title="${session.filename}"><strong><a href="javascript:void(0)" onclick="loadSessionDetails('${session.id}')" class="session-link">${pattern}</a></strong></td>
                         <td>${new Date(session.upload_timestamp).toLocaleString()}</td>
                         <td>
                             <div class="session-stats">
@@ -3786,7 +4011,8 @@ function displayAnalysisHistory(sessions) {
                             <button onclick="deleteSessionGroup('${session.id}', event)" class="btn-small btn-danger">Delete</button>
                         </td>
                     </tr>
-                `).join('')}
+                    `;
+                }).join('')}
             </tbody>
         </table>
     `;
@@ -3807,8 +4033,8 @@ function displayLocalAnalysisHistory(history) {
         <table class="history-table">
             <thead>
                 <tr>
+                    <th>Experiment Pattern</th>
                     <th>Date</th>
-                    <th>Filename</th>
                     <th>Wells</th>
                     <th>Good Curves</th>
                     <th>Positive Rate</th>
@@ -3816,10 +4042,12 @@ function displayLocalAnalysisHistory(history) {
                 </tr>
             </thead>
             <tbody>
-                ${history.map((session, index) => `
+                ${history.map((session, index) => {
+                    const pattern = extractBasePattern(session.filename);
+                    return `
                     <tr>
+                        <td title="${session.filename}">${pattern}</td>
                         <td>${new Date(session.timestamp).toLocaleDateString()}</td>
-                        <td>${session.filename}</td>
                         <td>${session.results.total_wells || 0}</td>
                         <td>${session.results.good_curves ? session.results.good_curves.length : 0}</td>
                         <td>${session.results.success_rate ? (session.results.success_rate * 100).toFixed(1) : 0}%</td>
@@ -3828,7 +4056,8 @@ function displayLocalAnalysisHistory(history) {
                             <button onclick="deleteLocalSession(${index})" class="btn-small btn-danger">Delete</button>
                         </td>
                     </tr>
-                `).join('')}
+                    `;
+                }).join('')}
             </tbody>
         </table>
     `;
@@ -5847,8 +6076,22 @@ function extractRealControlCoordinates(wellResults, testPattern) {
             const sampleName = well.sample_name || '';
             const wellId = well.well_id || well.wellId || '';
             const fluorophore = well.fluorophore || 'Unknown';
-            const wellCoordinate = wellId.split('_')[0] || ''; // Extract A1 from A1_Cy5
-            
+            // Robust coordinate extraction
+            let wellCoordinate = '';
+            if (wellId && typeof wellId === 'string' && wellId.includes('_')) {
+                wellCoordinate = wellId.split('_')[0] || '';
+            } else if (well.well_id && typeof well.well_id === 'string') {
+                wellCoordinate = well.well_id;
+            } else if (well.wellId && typeof well.wellId === 'string') {
+                wellCoordinate = well.wellId;
+            } else if (well.coordinate && typeof well.coordinate === 'string') {
+                wellCoordinate = well.coordinate;
+            }
+            if (index < 10) {
+                console.log(`🧪 [DB] WellId extraction: wellId="${wellId}", coordinate="${wellCoordinate}", sampleName="${sampleName}", fallbackSources:`, {
+                    well_id: well.well_id, wellId: well.wellId, coordinate: well.coordinate
+                });
+            }
             processControlWell(well, sampleName, wellId, fluorophore, wellCoordinate, index);
         });
     } else {
@@ -5858,8 +6101,30 @@ function extractRealControlCoordinates(wellResults, testPattern) {
             const well = wellResults[wellKey];
             const sampleName = well.sample_name || '';
             const fluorophore = well.fluorophore || 'Unknown';
-            const wellCoordinate = wellKey.split('_')[0] || ''; // Extract A1 from A1_Cy5
-            
+            // Robust coordinate extraction with regex fallback
+            let wellCoordinate = '';
+            if (wellKey && typeof wellKey === 'string' && wellKey.includes('_')) {
+                wellCoordinate = wellKey.split('_')[0] || '';
+            } else if (well.well_id && typeof well.well_id === 'string') {
+                wellCoordinate = well.well_id;
+            } else if (well.wellId && typeof well.wellId === 'string') {
+                wellCoordinate = well.wellId;
+            } else if (well.coordinate && typeof well.coordinate === 'string') {
+                wellCoordinate = well.coordinate;
+            }
+            // Fallback: extract coordinate from sample name using regex (e.g., A1H, B2NTC, etc.)
+            if (!wellCoordinate && typeof sampleName === 'string') {
+                const regex = /([A-P][0-9]{1,2})/i;
+                const match = sampleName.match(regex);
+                if (match) {
+                    wellCoordinate = match[1];
+                }
+            }
+            if (index < 10) {
+                console.log(`🧪 [UPLOAD] WellKey extraction: wellKey="${wellKey}", coordinate="${wellCoordinate}", sampleName="${sampleName}", fallbackSources:`, {
+                    well_id: well.well_id, wellId: well.wellId, coordinate: well.coordinate
+                });
+            }
             processControlWell(well, sampleName, wellKey, fluorophore, wellCoordinate, index);
             index++;
         });
@@ -5867,20 +6132,28 @@ function extractRealControlCoordinates(wellResults, testPattern) {
     
     function processControlWell(well, sampleName, wellId, fluorophore, wellCoordinate, index) {
         // Debug first few wells to see sample names and well structure
-        if (index < 5) {
+        if (index < 10) {
             console.log(`🔍 REAL CONTROLS - Well ${index}: wellId="${wellId}", coordinate="${wellCoordinate}", sample: "${sampleName}", fluorophore: ${fluorophore}`);
             console.log(`🔍 REAL CONTROLS - Well ${index} keys:`, Object.keys(well));
         }
-        
         // STEP 1: Use same logic as Controls filter dropdown
         const isControl = isControlSample(sampleName, testPattern);
-        if (index < 5) {
+        if (index < 10) {
             console.log(`🔍 REAL CONTROLS - Well ${index} isControl: ${isControl}`);
         }
-        
         if (isControl) {
             const controlType = extractControlTypeFromSample(sampleName);
-            
+            // Try to extract set number from sample name (e.g., 4H, H4, 4NTC, etc.)
+            let setNumber = null;
+            // Match patterns like 4H, 4NTC, H4, NTC4
+            let setMatch = sampleName.match(/(\d+)[HMLNTC]+/i) || sampleName.match(/[HMLNTC]+(\d+)/i);
+            if (setMatch) {
+                setNumber = parseInt(setMatch[1]);
+            }
+            // Fallback: if no set number, try to infer from position or default to 1
+            if (!setNumber) setNumber = 1;
+            // Debug log for control extraction
+            console.log(`🧪 CONTROL EXTRACT: sampleName="${sampleName}", controlType="${controlType}", setNumber=${setNumber}, coordinate="${wellCoordinate}", wellId="${wellId}"`);
             if (controlType && controlsByType[controlType]) {
                 // STEP 5: Extract well coordinate and use as matching coordinates
                 // Use direct coordinate if available, otherwise extract from wellId
@@ -6127,7 +6400,7 @@ function createPathogenGrid(pathogenName, pathogenControls) {
     // Debug: Check the structure of pathogenControls
     if (pathogenControls) {
         Object.keys(pathogenControls).forEach(controlType => {
-            const controls = pathogenControls[controlType];
+            const controls = Array.isArray(pathogenControls[controlType]) ? pathogenControls[controlType] : [];
             console.log(`🔍 PATHOGEN GRID - ${controlType} controls:`, controls.length, 'items');
             controls.forEach((ctrl, idx) => {
                 console.log(`🔍 PATHOGEN GRID - ${controlType}[${idx}]:`, {
@@ -6449,12 +6722,23 @@ function findAdjacentControlSets(wellResults) {
     // Convert well coordinates to row/col indices for easier sorting
     const wellsWithCoords = wellResults.map(well => {
         const coord = extractWellCoordinate(well.well_id);
-        if (!coord) return null;
-        
+        if (!coord || !coord.row || !coord.col) return null;
+        // Defensive: ensure row is a string and has at least one character
+        let rowIndex = null;
+        if (typeof coord.row === 'string' && coord.row.length > 0) {
+            // Support multi-letter rows (e.g., AA, AB)
+            rowIndex = 0;
+            for (let i = 0; i < coord.row.length; i++) {
+                rowIndex *= 26;
+                rowIndex += coord.row.charCodeAt(i) - 65 + 1;
+            }
+            rowIndex--;
+        }
+        let colIndex = parseInt(coord.col) - 1;
         return {
             ...well,
-            rowIndex: coord.row.charCodeAt(0) - 65, // A=0, B=1, etc.
-            colIndex: parseInt(coord.col) - 1,      // 1=0, 2=1, etc.
+            rowIndex,
+            colIndex,
             coordinate: coord.row + coord.col
         };
     }).filter(well => well !== null);
@@ -7220,7 +7504,73 @@ function showAllCurves(selectedFluorophore) {
     //     datasets.splice(50);
     // }
     
-    // Create chart with all curves
+    // --- Add threshold annotation(s) ---
+    let annotationPlugin = {};
+    const allResults = currentAnalysisResults.individual_results;
+    if (selectedFluorophore === 'all') {
+        // Show all available thresholds for all fluorophores
+        const allThresholds = {};
+        Object.values(allResults).forEach(res => {
+            if (res.fluorophore && res.threshold_value !== undefined) {
+                allThresholds[`threshold_${res.fluorophore}`] = {
+                    type: 'line',
+                    yMin: res.threshold_value,
+                    yMax: res.threshold_value,
+                    borderColor: getFluorophoreColor(res.fluorophore),
+                    borderWidth: 3,
+                    borderDash: [8, 6],
+                    label: {
+                        content: `Threshold (${res.fluorophore}: ${res.threshold_value})`,
+                        enabled: true,
+                        position: 'start',
+                        backgroundColor: 'rgba(255,255,255,0.85)',
+                        color: getFluorophoreColor(res.fluorophore),
+                        font: { weight: 'bold', size: 13 },
+                        xAdjust: 0,
+                        yAdjust: -10
+                    }
+                };
+            }
+        });
+        if (Object.keys(allThresholds).length > 0) {
+            annotationPlugin = {
+                annotation: {
+                    annotations: allThresholds
+                }
+            };
+        }
+    } else {
+        // Show only the selected fluorophore's threshold
+        const thresholdVal = Object.values(allResults).find(res => res.fluorophore === selectedFluorophore && typeof res.threshold_value === 'number')?.threshold_value;
+        if (typeof thresholdVal === 'number') {
+            annotationPlugin = {
+                annotation: {
+                    annotations: {
+                        thresholdLine: {
+                            type: 'line',
+                            yMin: thresholdVal,
+                            yMax: thresholdVal,
+                            borderColor: getFluorophoreColor(selectedFluorophore),
+                            borderWidth: 3,
+                            borderDash: [8, 6],
+                            label: {
+                                content: `Threshold (${selectedFluorophore}: ${thresholdVal})`,
+                                enabled: true,
+                                position: 'start',
+                                backgroundColor: 'rgba(255,255,255,0.85)',
+                                color: getFluorophoreColor(selectedFluorophore),
+                                font: { weight: 'bold', size: 13 },
+                                xAdjust: 0,
+                                yAdjust: -10
+                            }
+                        }
+                    }
+                }
+            };
+        }
+    }
+
+    // Create chart with all curves and threshold annotation(s)
     window.amplificationChart = new Chart(ctx, {
         type: 'line',
         data: { datasets },
@@ -7238,7 +7588,8 @@ function showAllCurves(selectedFluorophore) {
                 },
                 tooltip: {
                     enabled: false // Disable tooltips for better performance with many curves
-                }
+                },
+                ...annotationPlugin
             },
             scales: {
                 x: {
@@ -7533,7 +7884,59 @@ function showResultsFiltered(selectedFluorophore, resultType) {
         return;
     }
     
-    // Create chart with filtered results
+    // --- Add threshold annotation(s) ---
+    const allResults = currentAnalysisResults.individual_results;
+    let annotations = {};
+    if (selectedFluorophore === 'all') {
+        Object.values(allResults).forEach(res => {
+            if (res.fluorophore && res.threshold_value !== undefined) {
+                annotations[`threshold_${res.fluorophore}`] = {
+                    type: 'line',
+                    yMin: res.threshold_value,
+                    yMax: res.threshold_value,
+                    borderColor: getFluorophoreColor(res.fluorophore),
+                    borderWidth: 3,
+                    borderDash: [8, 6],
+                    label: {
+                        content: `Threshold (${res.fluorophore}: ${res.threshold_value})`,
+                        enabled: true,
+                        position: 'start',
+                        backgroundColor: 'rgba(255,255,255,0.85)',
+                        color: getFluorophoreColor(res.fluorophore),
+                        font: { weight: 'bold', size: 13 },
+                        xAdjust: 0,
+                        yAdjust: -10
+                    }
+                };
+            }
+        });
+    } else {
+        const thresholdVal = Object.values(allResults).find(res => res.fluorophore === selectedFluorophore && typeof res.threshold_value === 'number')?.threshold_value;
+        if (typeof thresholdVal === 'number') {
+            annotations = {
+                thresholdLine: {
+                    type: 'line',
+                    yMin: thresholdVal,
+                    yMax: thresholdVal,
+                    borderColor: getFluorophoreColor(selectedFluorophore),
+                    borderWidth: 3,
+                    borderDash: [8, 6],
+                    label: {
+                        content: `Threshold (${selectedFluorophore}: ${thresholdVal})`,
+                        enabled: true,
+                        position: 'start',
+                        backgroundColor: 'rgba(255,255,255,0.85)',
+                        color: getFluorophoreColor(selectedFluorophore),
+                        font: { weight: 'bold', size: 13 },
+                        xAdjust: 0,
+                        yAdjust: -10
+                    }
+                }
+            };
+        }
+    }
+
+    // Create chart with filtered results and threshold annotation(s)
     window.amplificationChart = new Chart(ctx, {
         type: 'line',
         data: { datasets },
@@ -7551,6 +7954,9 @@ function showResultsFiltered(selectedFluorophore, resultType) {
                 },
                 tooltip: {
                     enabled: datasets.length <= 20 // Disable tooltips for better performance with many curves
+                },
+                annotation: {
+                    annotations: annotations
                 }
             },
             scales: {
@@ -8659,7 +9065,11 @@ function extractControlSets(individualResults, testName) {
 
 // Extract well coordinate from well key (e.g., "A1_Cy5" -> "A1")
 function extractWellCoordinate(wellKey) {
-    return wellKey.split('_')[0];
+    // Extract row letters and column numbers from wellKey (e.g., "A1", "B12", "AA3")
+    const base = wellKey.split('_')[0];
+    const match = base.match(/^([A-Za-z]+)(\d+)$/);
+    if (!match) return null;
+    return { row: match[1], col: match[2] };
 }
 
 // Extract control type from sample name (e.g., "AcBVAB-H-1" -> "H")
