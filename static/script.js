@@ -1,3 +1,84 @@
+
+
+// --- Enhanced Chart.js annotation plugin registration ---
+function registerChartAnnotationPlugin() {
+    if (!window.Chart || !window.Chart.register) {
+        console.warn('[Chart.js] Chart.js not loaded yet, retrying in 100ms...');
+        setTimeout(registerChartAnnotationPlugin, 100);
+        return;
+    }
+    
+    // Try multiple possible global names for the annotation plugin
+    let plugin = null;
+    
+    // Check for different annotation plugin variations
+    if (window.ChartAnnotation) {
+        plugin = window.ChartAnnotation;
+        console.log('[Chart.js] Found annotation plugin as ChartAnnotation');
+    } else if (window.chartjsPluginAnnotation) {
+        plugin = window.chartjsPluginAnnotation;
+        console.log('[Chart.js] Found annotation plugin as chartjsPluginAnnotation');
+    } else if (window.annotationPlugin) {
+        plugin = window.annotationPlugin;
+        console.log('[Chart.js] Found annotation plugin as annotationPlugin');
+    } else if (window['chartjs-plugin-annotation']) {
+        plugin = window['chartjs-plugin-annotation'];
+        console.log('[Chart.js] Found annotation plugin as chartjs-plugin-annotation');
+    }
+    
+    if (plugin) {
+        try {
+            // Check if already registered
+            if (Chart.registry && Chart.registry.plugins && Chart.registry.plugins.get('annotation')) {
+                console.log('[Chart.js] Annotation plugin already registered');
+                return;
+            }
+            
+            // Register the plugin
+            Chart.register(plugin);
+            console.log('[Chart.js] Annotation plugin registered successfully!');
+            
+            // Verify registration
+            if (Chart.registry.plugins.get('annotation')) {
+                console.log('[Chart.js] Annotation plugin registration verified');
+            } else {
+                console.warn('[Chart.js] Annotation plugin registration failed verification');
+            }
+        } catch (error) {
+            console.error('[Chart.js] Error registering annotation plugin:', error);
+        }
+    } else {
+        console.warn('[Chart.js] Annotation plugin NOT found. Threshold lines will not be visible.');
+        console.log('[Chart.js] Available window objects:', Object.keys(window).filter(key => key.toLowerCase().includes('chart') || key.toLowerCase().includes('annotation')));
+        
+        // Try to load from CDN if not found
+        if (!document.querySelector('script[src*="chartjs-plugin-annotation"]')) {
+            console.log('[Chart.js] Attempting to load annotation plugin from CDN...');
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js';
+            script.onload = () => {
+                console.log('[Chart.js] Annotation plugin loaded from CDN, retrying registration...');
+                setTimeout(registerChartAnnotationPlugin, 100);
+            };
+            script.onerror = () => {
+                console.error('[Chart.js] Failed to load annotation plugin from CDN');
+            };
+            document.head.appendChild(script);
+        }
+    }
+}
+
+// Register immediately and on DOM ready
+registerChartAnnotationPlugin();
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(registerChartAnnotationPlugin, 500);
+});
+
+// Also try after Chart.js is loaded
+if (window.Chart) {
+    setTimeout(registerChartAnnotationPlugin, 100);
+}
+
 // Sorting mode for wells: 'letter-number' (A1, A2...) or 'number-letter' (A1, B1...)
 let wellSortMode = 'letter-number';
 
