@@ -1,3 +1,31 @@
+// Sorting mode for wells: 'letter-number' (A1, A2...) or 'number-letter' (A1, B1...)
+let wellSortMode = 'letter-number';
+
+function toggleWellSortMode() {
+    wellSortMode = (wellSortMode === 'letter-number') ? 'number-letter' : 'letter-number';
+    const btn = document.getElementById('toggleSortModeBtn');
+    if (btn) {
+        btn.textContent = (wellSortMode === 'letter-number') ? 'Sort: A1, A2...' : 'Sort: 1A, 1B...';
+    }
+    // Get the current fluorophore selection
+    const fluorophoreSelector = document.getElementById('fluorophoreSelect');
+    const selectedFluorophore = fluorophoreSelector ? fluorophoreSelector.value : 'all';
+    // Repopulate the well dropdown in the new order and reset to All Wells
+    if (typeof filterWellsByFluorophore === 'function') {
+        filterWellsByFluorophore(selectedFluorophore);
+    }
+    // Re-populate the table with the new sort mode
+    if (currentAnalysisResults && typeof populateResultsTable === 'function') {
+        populateResultsTable(currentAnalysisResults.individual_results);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const btn = document.getElementById('toggleSortModeBtn');
+    if (btn) {
+        btn.addEventListener('click', toggleWellSortMode);
+    }
+});
 // qPCR S-Curve Analyzer - Frontend JavaScript
 // Global variables
 let csvData = null;
@@ -946,18 +974,24 @@ function filterWellsByFluorophore(selectedFluorophore) {
         return (result.fluorophore || 'Unknown') === selectedFluorophore;
     });
     
-    // Sort wells naturally (A1, A2, ..., A10, A11, etc.)
+    // Sort wells according to the selected mode
     filteredResults.sort(([aWellKey, aResult], [bWellKey, bResult]) => {
         const aWellId = aResult.well_id || aWellKey;
         const bWellId = bResult.well_id || bWellKey;
-        
-        const aMatch = aWellId.match(/([A-Z]+)(\d+)/);
-        const bMatch = bWellId.match(/([A-Z]+)(\d+)/);
-        
+        const aMatch = aWellId.match(/([A-Z]+)(\d+)/i);
+        const bMatch = bWellId.match(/([A-Z]+)(\d+)/i);
         if (aMatch && bMatch) {
-            const letterCompare = aMatch[1].localeCompare(bMatch[1]);
-            if (letterCompare !== 0) return letterCompare;
-            return parseInt(aMatch[2]) - parseInt(bMatch[2]);
+            if (wellSortMode === 'letter-number') {
+                // A1, A2, ..., H12
+                const letterCompare = aMatch[1].localeCompare(bMatch[1]);
+                if (letterCompare !== 0) return letterCompare;
+                return parseInt(aMatch[2]) - parseInt(bMatch[2]);
+            } else {
+                // 1A, 1B, ..., 12H
+                const numCompare = parseInt(aMatch[2]) - parseInt(bMatch[2]);
+                if (numCompare !== 0) return numCompare;
+                return aMatch[1].localeCompare(bMatch[1]);
+            }
         }
         return aWellId.localeCompare(bWellId);
     });
@@ -1015,7 +1049,30 @@ function populateResultsTable(individualResults) {
         
         tableBody.innerHTML = '';
         
-        Object.entries(individualResults).forEach(([wellKey, result]) => {
+        // Sort wells according to the selected mode
+        let entries = Object.entries(individualResults);
+        entries.sort(([aWellKey, aResult], [bWellKey, bResult]) => {
+            const aWellId = aResult.well_id || aWellKey;
+            const bWellId = bResult.well_id || bWellKey;
+            const aMatch = aWellId.match(/([A-Z]+)(\d+)/i);
+            const bMatch = bWellId.match(/([A-Z]+)(\d+)/i);
+            if (aMatch && bMatch) {
+                if (wellSortMode === 'letter-number') {
+                    // A1, A2, ..., H12
+                    const letterCompare = aMatch[1].localeCompare(bMatch[1]);
+                    if (letterCompare !== 0) return letterCompare;
+                    return parseInt(aMatch[2]) - parseInt(bMatch[2]);
+                } else {
+                    // 1A, 1B, ..., 12H
+                    const numCompare = parseInt(aMatch[2]) - parseInt(bMatch[2]);
+                    if (numCompare !== 0) return numCompare;
+                    return aMatch[1].localeCompare(bMatch[1]);
+                }
+            }
+            return aWellId.localeCompare(bWellId);
+        });
+
+        entries.forEach(([wellKey, result]) => {
         const row = document.createElement('tr');
         row.setAttribute('data-well-key', wellKey); // Store actual wellKey for modal navigation
         
