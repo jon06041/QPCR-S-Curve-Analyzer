@@ -180,6 +180,10 @@ def process_with_sql_integration(amplification_data, samples_csv_data, fluoropho
         pass
     
     print(f"SQL-based integration completed for {fluorophore}")
+    # Debug print for threshold_value presence
+    if 'individual_results' in analysis_results:
+        for well_id, well_result in list(analysis_results['individual_results'].items())[:3]:
+            print(f"[DEBUG] Well {well_id} result sample: {well_result}")
     return analysis_results
 
 def create_multi_fluorophore_sql_analysis(all_fluorophore_data, samples_csv_data):
@@ -225,12 +229,12 @@ def create_multi_fluorophore_sql_analysis(all_fluorophore_data, samples_csv_data
         # Aggregate results
         if fluor_results.get('good_curves'):
             total_good_curves += len(fluor_results['good_curves'])
-            combined_results['good_curves'].extend([f"{well}_{fluorophore}" for well in fluor_results['good_curves']])
+            combined_results['good_curves'].extend([f"{well}_{fluor_results['fluorophore']}" for well in fluor_results['good_curves']])
         
         if fluor_results.get('individual_results'):
             total_analyzed_records += len(fluor_results['individual_results'])
             for well_id, well_result in fluor_results['individual_results'].items():
-                tagged_well_id = f"{well_id}_{fluorophore}"
+                tagged_well_id = f"{well_id}_{fluor_results['fluorophore']}"
                 combined_results['individual_results'][tagged_well_id] = well_result
     
     # Calculate combined metrics

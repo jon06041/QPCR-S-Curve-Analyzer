@@ -1,4 +1,3 @@
-
 import numpy as np
 from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
@@ -127,8 +126,11 @@ def analyze_curve_quality(cycles, rfu, plot=False,
                          min_amplitude=100,
                          min_plateau_rfu=50,
                          min_snr=3.0,
-                         min_growth_rate=5.0):
-    """Analyze if a curve matches S-shaped pattern and return quality metrics"""
+                         min_growth_rate=5.0,
+                         threshold_factor=10.0):
+    """Analyze if a curve matches S-shaped pattern and return quality metrics
+    threshold_factor: multiplier for baseline std to set threshold line (default 10.0)
+    """
     try:
         # Ensure we have enough data points
         if len(cycles) < 5 or len(rfu) < 5:
@@ -151,6 +153,11 @@ def analyze_curve_quality(cycles, rfu, plot=False,
                 'error': 'Insufficient valid data points',
                 'is_good_scurve': False
             }
+
+        # Calculate dynamic threshold
+        baseline = np.mean(rfu[:5])
+        baseline_std = np.std(rfu[:5])
+        threshold_value = baseline + threshold_factor * baseline_std
 
         # Dynamic initial parameter guesses based on data characteristics
         rfu_range = np.max(rfu) - np.min(rfu)
@@ -303,7 +310,10 @@ def analyze_curve_quality(cycles, rfu, plot=False,
             'raw_cycles': [float(x) for x in cycles],
             'raw_rfu': [float(x) for x in rfu],
             'residuals': [float(x) for x in residuals],
-            'post_cycle8_steepness': float(post_cycle8_steepness)
+            'post_cycle8_steepness': float(post_cycle8_steepness),
+
+            # Add threshold_value to criteria for frontend use
+            'threshold_value': float(threshold_value)
         }
 
         if plot:
@@ -317,6 +327,8 @@ def analyze_curve_quality(cycles, rfu, plot=False,
                      'r-',
                      label='Sigmoid Fit (R²={:.3f})'.format(r2),
                      linewidth=2)
+            # Add threshold line
+            plt.axhline(y=threshold_value, color='orange', linestyle='--', label=f'Threshold ({threshold_value:.1f})')
             plt.xlabel('Cycle')
             plt.ylabel('RFU')
             plt.legend()
@@ -691,7 +703,8 @@ def main():
 
     for test_case in test_cases:
         print(f"\n--- {test_case['name']} ---")
-        results = analyze_curve_quality(test_case['cycles'], test_case['rfu'])
+        # Enable plotting for each test case
+        results = analyze_curve_quality(test_case['cycles'], test_case['rfu'], plot=True)
 
         if 'error' in results:
             print(f'Error: {results["error"]}')

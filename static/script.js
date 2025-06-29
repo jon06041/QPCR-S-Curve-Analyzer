@@ -1,3 +1,11 @@
+console.log('[DEBUG] script.js loaded - version 20250628a');
+// Global error handler for all uncaught errors
+window.addEventListener('error', function(event) {
+    console.error('[GLOBAL ERROR]', event.message, event.filename, event.lineno, event.colno, event.error && event.error.stack);
+});
+window.addEventListener('unhandledrejection', function(event) {
+    console.error('[GLOBAL PROMISE REJECTION]', event.reason);
+});
 // qPCR S-Curve Analyzer - Frontend JavaScript
 // Global variables
 let csvData = null;
@@ -1207,30 +1215,27 @@ function showWellDetails(wellKey) {
         console.error('No analysis results available');
         return;
     }
-    
     const wellResult = currentAnalysisResults.individual_results[wellKey];
     if (!wellResult) {
         console.error('Well result not found:', wellKey);
         return;
     }
-    
     updateChart(wellKey);
-    
     let wellId = wellResult.well_id || wellKey;
     const fluorophore = wellResult.fluorophore || 'Unknown';
     const sampleName = wellResult.sample || wellResult.sample_name || 'N/A';
-    
+    // Cq values
+    const cqValue = Number.isFinite(Number(wellResult.cq_value)) ? Number(wellResult.cq_value).toFixed(2) : 'N/A';
+    const calculatedCq = (wellResult.calculated_cq !== null && wellResult.calculated_cq !== undefined && !isNaN(wellResult.calculated_cq)) ? wellResult.calculated_cq.toFixed(2) : 'N/A';
     // Check if we should show filtered samples list
     // Use currentChartMode for filtering logic since POS/NEG/REDO buttons update that
     const effectiveFilterMode = (currentChartMode === 'pos' || currentChartMode === 'neg' || currentChartMode === 'redo') ? currentChartMode : currentFilterMode;
     const shouldShowFilteredSamples = (effectiveFilterMode === 'pos' || effectiveFilterMode === 'neg' || effectiveFilterMode === 'redo') && 
                                      currentFluorophore && currentFluorophore !== 'all';
-    
     let filteredSamplesHtml = '';
     if (shouldShowFilteredSamples) {
         filteredSamplesHtml = generateFilteredSamplesHtml(effectiveFilterMode);
     }
-    
     const detailsHtml = `
         <h3>${wellId}: ${sampleName} (${fluorophore})</h3>
         <div class="quality-status ${wellResult.is_good_scurve ? 'good' : 'poor'}">
@@ -1253,10 +1258,17 @@ function showWellDetails(wellKey) {
                 <span class="metric-label">Midpoint:</span>
                 <span class="metric-value">${(wellResult.midpoint || 0).toFixed(2)}</span>
             </div>
+            <div class="metric">
+                <span class="metric-label">Cq Value (Summary):</span>
+                <span class="metric-value">${cqValue}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Cq Value (Calculated):</span>
+                <span class="metric-value">${calculatedCq}</span>
+            </div>
         </div>
         ${filteredSamplesHtml}
     `;
-    
     document.getElementById('curveDetails').innerHTML = detailsHtml;
 }
 
@@ -1523,6 +1535,58 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
         });
     }
     
+    // Add threshold line for this well/fluorophore if available, or for all fluorophores if selected
+    let annotationPlugin = {};
+    console.log('[DEBUG] wellResult before threshold access:', wellResult);
+    let threshold = (wellResult && typeof wellResult.threshold_value === 'number') ? wellResult.threshold_value : undefined;
+    // If a specific fluorophore is selected, show its threshold if available
+    if (threshold !== undefined) {
+        annotationPlugin = {
+            annotation: {
+                annotations: {
+                    thresholdLine: {
+                        type: 'line',
+                        yMin: threshold,
+                        yMax: threshold,
+                        borderColor: 'orange',
+                        borderWidth: 2,
+                        label: {
+                            content: 'Threshold',
+                            enabled: true,
+                            position: 'end'
+                        }
+                    }
+                }
+            }
+        };
+    } else if (currentAnalysisResults && currentAnalysisResults.individual_results) {
+        // If "all" is selected, show all available threshold lines
+        const allThresholds = {};
+        Object.values(currentAnalysisResults.individual_results).forEach(res => {
+            if (res.fluorophore && res.threshold_value !== undefined) {
+                allThresholds[`threshold_${res.fluorophore}`] = {
+                    type: 'line',
+                    yMin: res.threshold_value,
+                    yMax: res.threshold_value,
+                    borderColor: getFluorophoreColor(res.fluorophore),
+                    borderWidth: 2,
+                    label: {
+                        content: `Threshold (${res.fluorophore})`,
+                        enabled: true,
+                        position: 'end'
+                    }
+                };
+            }
+        });
+        if (Object.keys(allThresholds).length > 0) {
+            annotationPlugin = {
+                annotation: {
+                    annotations: allThresholds
+                }
+            };
+        }
+    }
+
     window.amplificationChart = new Chart(ctx, {
         type: 'scatter',
         data: { datasets: datasets },
@@ -1539,7 +1603,8 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
                 legend: {
                     display: true,
                     position: 'top'
-                }
+                },
+                ...annotationPlugin
             },
             scales: {
                 x: {
