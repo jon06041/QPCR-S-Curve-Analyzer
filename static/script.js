@@ -548,17 +548,36 @@ async function performAnalysis() {
         const allResults = {};
         const fluorophores = Object.keys(amplificationFiles);
         
+        console.log(`🔍 UPLOAD-DEBUG - Starting analysis of ${fluorophores.length} fluorophores:`, fluorophores);
+        console.log(`🔍 UPLOAD-DEBUG - amplificationFiles contents:`, 
+            Object.fromEntries(Object.entries(amplificationFiles).map(([key, file]) => [key, {
+                fileName: file.fileName,
+                dataRows: file.data?.length || 0,
+                firstDataRow: file.data?.[1]?.slice(0, 5) || []
+            }]))
+        );
+        
         for (const fluorophore of fluorophores) {
-            console.log(`Analyzing ${fluorophore}...`);
-            
-            const selectedFile = amplificationFiles[fluorophore];
-            const analysisData = prepareAnalysisData(selectedFile.data);
-            
-            // Validate we have data to analyze
-            if (!analysisData || Object.keys(analysisData).length === 0) {
-                console.warn(`No valid well data found for ${fluorophore}`);
-                continue;
-            }
+            try {
+                console.log(`🔍 MULTI-PROCESS - Processing fluorophore: ${fluorophore} (${Object.keys(allResults).length + 1} of ${fluorophores.length})`);
+                console.log(`Analyzing ${fluorophore}...`);
+                
+                const selectedFile = amplificationFiles[fluorophore];
+                console.log(`🔍 MULTI-PROCESS - File for ${fluorophore}:`, selectedFile.fileName);
+                const analysisData = prepareAnalysisData(selectedFile.data);
+                
+                console.log(`🔍 DATA-PREP - Analysis data for ${fluorophore}:`, {
+                    hasData: !!analysisData,
+                    wellCount: Object.keys(analysisData || {}).length,
+                    firstWells: Object.keys(analysisData || {}).slice(0, 3),
+                    dataSize: JSON.stringify(analysisData || {}).length
+                });
+                
+                // Validate we have data to analyze
+                if (!analysisData || Object.keys(analysisData).length === 0) {
+                    console.warn(`🔍 DATA-PREP - No valid well data found for ${fluorophore}, SKIPPING`);
+                    continue;
+                }
             
             console.log('Sending analysis data for', fluorophore, ':', analysisData);
             
@@ -586,15 +605,23 @@ async function performAnalysis() {
             }
             
             // Send to backend for analysis
-            const response = await fetch('/analyze', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Filename': selectedFile.fileName,
-                    'X-Fluorophore': fluorophore
-                },
-                body: JSON.stringify(requestPayload)
-            });
+            let response;
+            try {
+                console.log(`🔍 NETWORK-DEBUG - Starting fetch for ${fluorophore}...`);
+                response = await fetch('/analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Filename': selectedFile.fileName,
+                        'X-Fluorophore': fluorophore
+                    },
+                    body: JSON.stringify(requestPayload)
+                });
+                console.log(`🔍 NETWORK-DEBUG - Fetch completed for ${fluorophore}, status: ${response.status}`);
+            } catch (networkError) {
+                console.error(`🔍 NETWORK-ERROR - Fetch failed for ${fluorophore}:`, networkError);
+                throw new Error(`Network error for ${fluorophore}: ${networkError.message}`);
+            }
 
             if (!response.ok) {
                 const errorData = await response.json();
@@ -604,19 +631,74 @@ async function performAnalysis() {
 
             let results;
             try {
-                const responseText = await response.text();
-                console.log(`Raw response for ${fluorophore}:`, responseText.substring(0, 500) + '...');
-                results = JSON.parse(responseText);
+                // Use response.json() directly since backend now returns proper JSON
+                results = await response.json();
+                
+                console.log(`🔍 JSON-DEBUG - Direct JSON parse for ${fluorophore}:`, {
+                    type: typeof results,
+                    hasIndividualResults: !!(results?.individual_results),
+                    individualResultsType: typeof results?.individual_results,
+                    wellCount: Object.keys(results?.individual_results || {}).length,
+                    successRate: results?.success_rate,
+                    totalWells: results?.total_wells
+                });
+                
                 console.log(`Analysis results for ${fluorophore}:`, results);
                 
                 // Store results for this fluorophore
                 allResults[fluorophore] = results;
+                console.log(`🔍 MULTI-PROCESS - Stored results for ${fluorophore}, total results now:`, Object.keys(allResults));
+                
+                // IMPORTANT: Verify results are properly stored and not being overwritten
+                console.log(`🔍 STORAGE-CHECK - After storing ${fluorophore}:`);
+                Object.keys(allResults).forEach(key => {
+                    const result = allResults[key];
+                    console.log(`  - ${key}: ${result ? 'HAS_DATA' : 'NULL'} | wells: ${Object.keys(result?.individual_results || {}).length} | success_rate: ${result?.success_rate}`);
+                });
+                
+                // Add a small delay to ensure proper sequencing
+                await new Promise(resolve => setTimeout(resolve, 100));
                 
             } catch (parseError) {
-                console.error('JSON parsing error:', parseError);
-                throw new Error('Failed to parse server response: ' + parseError.message);
+                console.error(`🔍 PARSE-ERROR - JSON parsing failed for ${fluorophore}:`, parseError);
+                // Continue with other fluorophores even if one fails to parse
+                continue;
             }
+            
+        } catch (fluorophoreError) {
+            console.error(`🔍 FLUOR-ERROR - Failed to process ${fluorophore}:`, fluorophoreError);
+            // Continue with other fluorophores even if one completely fails
+            continue;
         }
+    }
+        
+        // Debug: Final check of allResults after the loop completes
+        console.log('🔍 LOOP-COMPLETE - Final allResults after processing all fluorophores:');
+        Object.keys(allResults).forEach(key => {
+            const result = allResults[key];
+            console.log(`  - FINAL ${key}: ${result ? 'HAS_DATA' : 'NULL'} | wells: ${Object.keys(result?.individual_results || {}).length} | success_rate: ${result?.success_rate}`);
+            if (result && result.individual_results) {
+                const wells = Object.keys(result.individual_results);
+                console.log(`    Sample wells: ${wells.slice(0, 5).join(', ')}${wells.length > 5 ? '...' : ''}`);
+            }
+        });
+        
+        // Debug: Check all results collected before processing
+        console.log('🔍 MULTI-DEBUG - All results collected:', {
+            fluorophores: Object.keys(allResults),
+            resultCounts: Object.fromEntries(
+                Object.entries(allResults).map(([fluor, result]) => [
+                    fluor, 
+                    {
+                        hasResults: !!result,
+                        hasIndividualResults: !!(result?.individual_results),
+                        wellCount: Object.keys(result?.individual_results || {}).length,
+                        successRate: result?.success_rate,
+                        totalWells: result?.total_wells
+                    }
+                ])
+            )
+        });
         
         // If only one fluorophore was analyzed, save it properly to database
         if (fluorophores.length === 1) {
@@ -639,15 +721,39 @@ async function performAnalysis() {
             // Save single fluorophore session to database with proper well counts
             await saveSingleFluorophoreSession(filename, singleResult, fluorophores[0]);
             
-            // Save experiment statistics for trend analysis (single-channel)
-            const basePattern = extractBasePattern(filename);
-            await saveExperimentStatistics(basePattern, allResults, fluorophores);
+            // Save experiment statistics for trend analysis (single-channel) - with error handling
+            try {
+                const basePattern = extractBasePattern(filename);
+                await saveExperimentStatistics(basePattern, allResults, fluorophores);
+                console.log('✅ Statistics saved successfully for single-channel');
+            } catch (statsError) {
+                console.error('⚠️ Statistics save failed for single-channel (non-critical):', statsError);
+                // Don't throw - statistics are optional
+            }
             
             await displayAnalysisResults(singleResult);
         } else {
             // Combine all fluorophore results for multi-fluorophore display (SQL-integrated)
             const combinedResults = combineMultiFluorophoreResultsSQL(allResults);
             analysisResults = combinedResults;
+            
+            // 🔍 POST-COMBINE DEBUG: Check if combinedResults are complete
+            console.log('🔍 POST-COMBINE-DEBUG - Results after combination:', {
+                combinedResultsExists: !!combinedResults,
+                hasIndividualResults: !!(combinedResults?.individual_results),
+                totalWellsInCombined: Object.keys(combinedResults?.individual_results || {}).length,
+                fluorophoreCount: combinedResults?.fluorophore_count || 0,
+                firstTenWells: Object.keys(combinedResults?.individual_results || {}).slice(0, 10),
+                fluorophoreBreakdown: (() => {
+                    const wells = combinedResults?.individual_results || {};
+                    const breakdown = {};
+                    Object.keys(wells).forEach(wellKey => {
+                        const fluorophore = wells[wellKey].fluorophore || 'Unknown';
+                        breakdown[fluorophore] = (breakdown[fluorophore] || 0) + 1;
+                    });
+                    return breakdown;
+                })()
+            });
             
             // Set global variables for control grid access during fresh analysis
             currentAnalysisResults = combinedResults;
@@ -668,8 +774,14 @@ async function performAnalysis() {
             // Save combined session to database
             await saveCombinedSession(filename, combinedResults, fluorophores);
             
-            // Save experiment statistics for trend analysis
-            await saveExperimentStatistics(basePattern, allResults, fluorophores);
+            // Save experiment statistics for trend analysis - with error handling
+            try {
+                await saveExperimentStatistics(basePattern, allResults, fluorophores);
+                console.log('✅ Statistics saved successfully for multi-channel');
+            } catch (statsError) {
+                console.error('⚠️ Statistics save failed for multi-channel (non-critical):', statsError);
+                // Don't throw - statistics are optional
+            }
             
             await displayMultiFluorophoreResults(combinedResults);
         }
@@ -754,19 +866,14 @@ async function displayAnalysisResults(results) {
     const controlIssues = validateControls(individualResults);
     displayControlValidationAlerts(controlIssues);
     
-    // Display pathogen control grids for visual validation - ONLY for fresh uploads
-    // Skip control grid creation if this is a history load (detected by currentSessionFilename)
-    const isHistoryLoad = window.currentSessionFilename && window.currentSessionFilename !== experimentPattern;
+    // Display pathogen control grids for visual validation
     const testCode = extractTestCodeFromExperimentPattern(experimentPattern);
+    console.log('🔍 FRESH UPLOAD - Creating control grid for testCode:', testCode);
+    console.log('🔍 FRESH UPLOAD - Experiment pattern:', experimentPattern);
+    console.log('🔍 FRESH UPLOAD - Current analysis results available:', !!currentAnalysisResults);
+    console.log('🔍 FRESH UPLOAD - Individual results count:', Object.keys(individualResults).length);
     
-    console.log('🔍 FRESH UPLOAD - Control grid check:', {
-        testCode: testCode,
-        experimentPattern: experimentPattern,
-        currentSessionFilename: window.currentSessionFilename,
-        isHistoryLoad: isHistoryLoad
-    });
-    
-    if (testCode && !isHistoryLoad) {
+    if (testCode) {
         // Clear any existing control grids first to prevent duplicates
         const pathogenGridsContainer = document.getElementById('pathogenControlGrids');
         if (pathogenGridsContainer) {
@@ -777,6 +884,7 @@ async function displayAnalysisResults(results) {
         // Use real pathogen grid system for fresh uploads (same as used to work)
         if (window.showPathogenGridsWithData && typeof window.showPathogenGridsWithData === 'function') {
             console.log('🔍 FRESH UPLOAD - Using real pathogen grids system');
+            console.log('🔍 FRESH UPLOAD - Forcing grid display in 100ms...');
             setTimeout(() => {
                 console.log('🔍 FRESH UPLOAD - Calling showPathogenGridsWithData now');
                 window.showPathogenGridsWithData(testCode, controlIssues || []);
@@ -787,10 +895,10 @@ async function displayAnalysisResults(results) {
                 createUniversalControlGrid(testCode, individualResults);
             }, 100);
         }
-    } else if (isHistoryLoad) {
-        console.log('🔍 FRESH UPLOAD - Skipping control grid creation for history load');
     } else {
         console.log('🔍 FRESH UPLOAD - Could not extract test code from pattern:', experimentPattern);
+        console.log('🔍 FRESH UPLOAD - Available amplification files:', Object.keys(amplificationFiles || {}));
+        console.log('🔍 FRESH UPLOAD - First file name:', Object.values(amplificationFiles || {})[0]?.fileName);
     }
     
     populateWellSelector(individualResults);
@@ -812,7 +920,24 @@ async function displayAnalysisResults(results) {
 }
 
 async function displayMultiFluorophoreResults(results) {
-    console.log('Displaying multi-fluorophore results:', results);
+    console.log('🔍 DISPLAY-DEBUG - Displaying multi-fluorophore results:', {
+        resultsExists: !!results,
+        hasIndividualResults: !!(results?.individual_results),
+        individualResultsType: typeof results?.individual_results,
+        totalWellsReceived: Object.keys(results?.individual_results || {}).length,
+        fluorophoreCount: results?.fluorophore_count || 0,
+        firstTenWellKeys: Object.keys(results?.individual_results || {}).slice(0, 10),
+        fluorophoreBreakdown: (() => {
+            const wells = results?.individual_results || {};
+            const breakdown = {};
+            Object.keys(wells).forEach(wellKey => {
+                const fluorophore = wells[wellKey].fluorophore || 'Unknown';
+                breakdown[fluorophore] = (breakdown[fluorophore] || 0) + 1;
+            });
+            return breakdown;
+        })(),
+        resultsStructure: results
+    });
     
     if (!results || !results.individual_results) {
         console.error('Invalid multi-fluorophore results structure:', results);
@@ -890,18 +1015,16 @@ async function displayMultiFluorophoreResults(results) {
     populateWellSelector(results.individual_results);
     populateResultsTable(results.individual_results);
     
-    // Create control grids for multi-fluorophore analysis - Only for fresh uploads, not history loads
-    const isHistoryLoad = window.currentSessionFilename && window.currentSessionFilename !== experimentPattern;
+    // Create control grids for multi-fluorophore analysis
     const testCode = extractTestCodeFromExperimentPattern(experimentPattern);
     
     console.log('🔍 MULTI-FLUOROPHORE - Control grid check:', {
         testCode: testCode,
         experimentPattern: experimentPattern,
-        currentSessionFilename: window.currentSessionFilename,
-        isHistoryLoad: isHistoryLoad
+        currentSessionFilename: window.currentSessionFilename
     });
     
-    if (testCode && !isHistoryLoad) {
+    if (testCode) {
         console.log('🔍 MULTI-FLUOROPHORE - Extracted test code for control grids:', testCode);
         
         // Clear any existing control grids first to prevent duplicates
@@ -911,7 +1034,7 @@ async function displayMultiFluorophoreResults(results) {
             pathogenGridsContainer.style.display = 'none';
         }
         
-        // Use real pathogen grid system for multi-fluorophore fresh uploads
+        // Always create control grids for multi-fluorophore results
         if (window.showPathogenGridsWithData && typeof window.showPathogenGridsWithData === 'function') {
             console.log('🔍 MULTI-FLUOROPHORE - Using real pathogen grids system');
             setTimeout(() => {
@@ -923,8 +1046,6 @@ async function displayMultiFluorophoreResults(results) {
                 createUniversalControlGrid(testCode, results.individual_results);
             }, 100);
         }
-    } else if (isHistoryLoad) {
-        console.log('🔍 MULTI-FLUOROPHORE - Skipping control grid creation for history load');
     } else {
         console.log('🔍 MULTI-FLUOROPHORE - Could not extract test code from pattern:', experimentPattern);
     }
@@ -1205,6 +1326,21 @@ function populateWellSelector(individualResults) {
 
 function populateResultsTable(individualResults) {
     try {
+        console.log('🔍 TABLE-DEBUG - Populating results table with:', {
+            individualResultsExists: !!individualResults,
+            totalWellsReceived: Object.keys(individualResults || {}).length,
+            firstTenWells: Object.keys(individualResults || {}).slice(0, 10),
+            fluorophoreBreakdown: (() => {
+                const wells = individualResults || {};
+                const breakdown = {};
+                Object.keys(wells).forEach(wellKey => {
+                    const fluorophore = wells[wellKey].fluorophore || 'Unknown';
+                    breakdown[fluorophore] = (breakdown[fluorophore] || 0) + 1;
+                });
+                return breakdown;
+            })()
+        });
+        
         const tableBody = document.getElementById('resultsTableBody');
         if (!tableBody) {
             console.error('Results table body not found');
@@ -1683,6 +1819,12 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
     // Prepare annotation for threshold if present
     let annotation = undefined;
     console.log('[Chart.js][updateChart] wellResult:', wellResult);
+    console.log('[Chart.js][updateChart] threshold_value debug:', {
+        threshold_value: wellResult ? wellResult.threshold_value : 'wellResult is null',
+        type: wellResult ? typeof wellResult.threshold_value : 'N/A',
+        isNull: wellResult ? (wellResult.threshold_value == null) : 'N/A',
+        isNaN: wellResult ? isNaN(wellResult.threshold_value) : 'N/A'
+    });
     if (wellResult && wellResult.threshold_value != null && !isNaN(wellResult.threshold_value)) {
         annotation = {
             annotations: {
@@ -2172,6 +2314,30 @@ function combineMultiFluorophoreResults(allResults) {
 function combineMultiFluorophoreResultsSQL(allResults) {
     console.log('=== COMBINING SQL-INTEGRATED MULTI-FLUOROPHORE RESULTS ===');
     const fluorophores = Object.keys(allResults);
+    
+    console.log('🔍 COMBINE-DEBUG - Input analysis:', {
+        fluorophores: fluorophores,
+        allResultsKeys: Object.keys(allResults),
+        firstResultExists: !!allResults[fluorophores[0]],
+        resultsDetailedAnalysis: Object.fromEntries(
+            fluorophores.map(fluor => [
+                fluor,
+                {
+                    exists: !!allResults[fluor],
+                    hasIndividualResults: !!(allResults[fluor]?.individual_results),
+                    individualResultsType: typeof allResults[fluor]?.individual_results,
+                    wellCount: Object.keys(allResults[fluor]?.individual_results || {}).length,
+                    sampleWellKeys: Object.keys(allResults[fluor]?.individual_results || {}).slice(0, 3)
+                }
+            ])
+        )
+    });
+    
+    if (fluorophores.length === 0) {
+        console.error('🔍 COMBINE-ERROR - No fluorophores found in allResults');
+        return { individual_results: {}, fluorophore_count: 0 };
+    }
+    
     const firstResult = allResults[fluorophores[0]];
     
     console.log('SQL-integrated fluorophores:', fluorophores);
@@ -2190,23 +2356,60 @@ function combineMultiFluorophoreResultsSQL(allResults) {
     fluorophores.forEach(fluorophore => {
         const results = allResults[fluorophore];
         
+        console.log(`🔍 COMBINE-LOOP - Processing ${fluorophore}:`, {
+            hasResults: !!results,
+            hasGoodCurves: !!(results?.good_curves),
+            goodCurvesLength: results?.good_curves?.length || 0,
+            hasIndividualResults: !!(results?.individual_results),
+            individualResultsKeys: Object.keys(results?.individual_results || {}),
+            individualResultsCount: Object.keys(results?.individual_results || {}).length
+        });
+        
         if (results.good_curves) {
             totalGoodCurves += results.good_curves.length;
             combined.good_curves.push(...results.good_curves.map(well => `${well}_${fluorophore}`));
         }
         
         if (results.individual_results) {
-            totalAnalyzedRecords += Object.keys(results.individual_results).length;
+            const currentCount = Object.keys(results.individual_results).length;
+            totalAnalyzedRecords += currentCount;
+            
+            console.log(`🔍 COMBINE-WELLS - Adding ${currentCount} wells from ${fluorophore}`);
+            
             Object.keys(results.individual_results).forEach(wellKey => {
                 const wellResult = results.individual_results[wellKey];
                 const newWellKey = `${wellKey}_${fluorophore}`;
                 
+                // 🔍 COMBINE-THRESHOLD-DEBUG: Check threshold preservation
+                if (wellKey.includes('A1')) {
+                    console.log(`🔍 COMBINE-THRESHOLD - Processing ${wellKey} for ${fluorophore}:`, {
+                        originalThreshold: wellResult.threshold_value,
+                        thresholdType: typeof wellResult.threshold_value,
+                        wellKey: wellKey,
+                        newWellKey: newWellKey
+                    });
+                }
+                
                 // SQL integration already provided sample_name and cq_value
                 combined.individual_results[newWellKey] = {
                     ...wellResult,
-                    fluorophore: fluorophore
+                    fluorophore: fluorophore,
+                    // Ensure threshold_value is explicitly preserved
+                    threshold_value: wellResult.threshold_value
                 };
+                
+                // 🔍 COMBINE-THRESHOLD-DEBUG: Verify preservation
+                if (wellKey.includes('A1')) {
+                    console.log(`🔍 COMBINE-THRESHOLD - After combination ${newWellKey}:`, {
+                        preservedThreshold: combined.individual_results[newWellKey].threshold_value,
+                        thresholdMatches: combined.individual_results[newWellKey].threshold_value === wellResult.threshold_value
+                    });
+                }
             });
+            
+            console.log(`🔍 COMBINE-WELLS - Combined now has ${Object.keys(combined.individual_results).length} total wells`);
+        } else {
+            console.warn(`🔍 COMBINE-WARN - No individual_results for ${fluorophore}`);
         }
     });
     
@@ -2214,11 +2417,26 @@ function combineMultiFluorophoreResultsSQL(allResults) {
     combined.success_rate = totalAnalyzedRecords > 0 ? 
         (totalGoodCurves / totalAnalyzedRecords * 100) : 0;
     
-    console.log('SQL-based multi-fluorophore combination complete:', {
+    console.log('🔍 FINAL-COMBINE-DEBUG - SQL-based multi-fluorophore combination complete:', {
         fluorophores: fluorophores,
         totalRecords: Object.keys(combined.individual_results).length,
         totalGoodCurves: totalGoodCurves,
-        successRate: combined.success_rate
+        successRate: combined.success_rate,
+        detailedBreakdown: Object.fromEntries(
+            fluorophores.map(fluor => [
+                fluor,
+                {
+                    wellsInCombined: Object.keys(combined.individual_results).filter(key => key.includes(`_${fluor}`)).length,
+                    sampleWellsInCombined: Object.keys(combined.individual_results).filter(key => key.includes(`_${fluor}`)).slice(0, 3)
+                }
+            ])
+        ),
+        firstFewWells: Object.keys(combined.individual_results).slice(0, 10),
+        combinedStructure: {
+            hasIndividualResults: !!combined.individual_results,
+            individualResultsKeys: Object.keys(combined.individual_results).length,
+            fluorophoreCount: combined.fluorophore_count
+        }
     });
     
     return combined;
@@ -2494,13 +2712,44 @@ async function saveSingleFluorophoreSession(filename, results, fluorophore) {
 }
 
 async function saveCombinedSession(filename, combinedResults, fluorophores = []) {
-    // Disable combined session saving due to data structure issues
-    // Only individual fluorophore sessions will be saved
-    console.log('Combined session saving disabled - using individual sessions only');
-    console.log('Individual sessions working correctly:', fluorophores);
-    
-    // Still refresh history to show the individual sessions
-    loadAnalysisHistory();
+    try {
+        console.log('🔍 SAVE-DEBUG - Saving combined session:', {
+            filename: filename,
+            totalWells: Object.keys(combinedResults.individual_results || {}).length,
+            fluorophores: fluorophores,
+            fluorophoreCount: combinedResults.fluorophore_count
+        });
+        
+        const response = await fetch('/sessions/save-combined', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                filename: filename,
+                combined_results: combinedResults,
+                fluorophores: fluorophores
+            })
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error('Failed to save combined session:', errorData);
+            throw new Error(`Server error: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        console.log('✅ Combined session saved successfully:', result);
+        
+        // Refresh history to show the new session
+        loadAnalysisHistory();
+        
+    } catch (error) {
+        console.error('Error saving combined session:', error);
+        // Fall back to individual sessions
+        console.log('Falling back to individual sessions:', fluorophores);
+        loadAnalysisHistory();
+    }
 }
 
 function getLocalAnalysisHistory() {
@@ -4158,7 +4407,15 @@ async function loadSessionDetails(sessionId) {
                     }
                 })(),
                 // Add missing threshold_value field for threshold annotations
-                threshold_value: well.threshold_value
+                threshold_value: well.threshold_value,
+                
+                // 🔍 THRESHOLD-DEBUG: Log threshold_value during history loading
+                _debug_threshold: {
+                    original_threshold: well.threshold_value,
+                    type: typeof well.threshold_value,
+                    isNull: well.threshold_value == null,
+                    isNaN: isNaN(well.threshold_value)
+                }
             };
         });
         
@@ -4193,36 +4450,8 @@ async function loadSessionDetails(sessionId) {
         // Display using multi-fluorophore layout (handles both single and multi-channel)
         displayMultiFluorophoreResults(transformedResults);
         
-        // Create control grids specifically for history loads (since displayMultiFluorophoreResults skips them for history)
-        console.log('🔍 HISTORY LOAD - Creating control grids for history session');
-        const testCode = extractTestCodeFromSession(session.filename);
-        if (testCode) {
-            console.log('🔍 HISTORY LOAD - Extracted test code:', testCode);
-            
-            // Clear any existing control grids first
-            const pathogenGridsContainer = document.getElementById('pathogenControlGrids');
-            if (pathogenGridsContainer) {
-                pathogenGridsContainer.innerHTML = '';
-                pathogenGridsContainer.style.display = 'none';
-            }
-            
-            // Use real pathogen grid system for history loads
-            if (window.showPathogenGridsWithData && typeof window.showPathogenGridsWithData === 'function') {
-                console.log('🔍 HISTORY LOAD - Using real pathogen grids system');
-                setTimeout(() => {
-                    window.showPathogenGridsWithData(testCode, []);
-                }, 200);
-            } else {
-                console.log('🔍 HISTORY LOAD - Fallback to universal control grid');
-                setTimeout(() => {
-                    createUniversalControlGrid(testCode, transformedResults.individual_results);
-                }, 200);
-            }
-        } else {
-            console.log('🔍 HISTORY LOAD - Could not extract test code from session filename:', session.filename);
-        }
-        
-        console.log('🔍 HISTORY LOAD - Control grids handled by dedicated history logic');
+        // Control grids are now handled within displayMultiFluorophoreResults
+        console.log('🔍 HISTORY LOAD - Control grids handled by displayMultiFluorophoreResults');
         
         // Trigger enhanced control validation display
         setTimeout(() => {
