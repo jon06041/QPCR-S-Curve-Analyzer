@@ -734,26 +734,30 @@ async function displayAnalysisResults(results) {
     
     // Display pathogen control grids for visual validation
     const testCode = extractTestCodeFromExperimentPattern(experimentPattern);
-    console.log('🔍 INDIVIDUAL CHANNEL - Function check:', {
-        'window.showPathogenGridsWithData exists': !!window.showPathogenGridsWithData,
-        'typeof': typeof window.showPathogenGridsWithData,
-        'testCode': testCode
-    });
+    console.log('🔍 FRESH UPLOAD - Creating control grid for testCode:', testCode);
     
-    if (window.showPathogenGridsWithData && typeof window.showPathogenGridsWithData === 'function') {
-        console.log('🔍 INDIVIDUAL CHANNEL - Calling showPathogenGridsWithData for testCode:', testCode);
-        window.showPathogenGridsWithData(testCode, controlIssues);
-    } else {
-        console.log('🔍 INDIVIDUAL CHANNEL - showPathogenGridsWithData function not available, using fallback');
-        // Universal fallback: create basic control grid for any test type
-        if (testCode) {
-            // Delay slightly to ensure DOM is ready
+    if (testCode) {
+        // Clear any existing control grids first to prevent duplicates
+        const pathogenGridsContainer = document.getElementById('pathogenControlGrids');
+        if (pathogenGridsContainer) {
+            pathogenGridsContainer.innerHTML = '';
+            pathogenGridsContainer.style.display = 'none';
+        }
+        
+        // Use real pathogen grid system for fresh uploads (same as used to work)
+        if (window.showPathogenGridsWithData && typeof window.showPathogenGridsWithData === 'function') {
+            console.log('🔍 FRESH UPLOAD - Using real pathogen grids system');
+            setTimeout(() => {
+                window.showPathogenGridsWithData(testCode, []);
+            }, 100);
+        } else {
+            console.log('🔍 FRESH UPLOAD - Fallback to universal control grid');
             setTimeout(() => {
                 createUniversalControlGrid(testCode, individualResults);
             }, 100);
-        } else {
-            console.log('🔍 INDIVIDUAL CHANNEL - Could not extract test code from pattern:', experimentPattern);
         }
+    } else {
+        console.log('🔍 FRESH UPLOAD - Could not extract test code from pattern:', experimentPattern);
     }
     
     populateWellSelector(individualResults);
@@ -853,17 +857,33 @@ async function displayMultiFluorophoreResults(results) {
     populateWellSelector(results.individual_results);
     populateResultsTable(results.individual_results);
     
-    // Create control grids for fresh analysis
-    console.log('🔍 Creating control grids for fresh multi-fluorophore analysis');
+    // Create control grids for fresh multi-fluorophore analysis
+    console.log('🔍 MULTI-FLUOROPHORE - Creating control grids for fresh analysis');
     const testCode = extractTestCodeFromExperimentPattern(experimentPattern);
     if (testCode) {
-        console.log('🔍 Extracted test code for control grids:', testCode);
-        // Delay slightly to ensure DOM is ready
-        setTimeout(() => {
-            createUniversalControlGrid(testCode, results.individual_results);
-        }, 100);
+        console.log('🔍 MULTI-FLUOROPHORE - Extracted test code for control grids:', testCode);
+        
+        // Clear any existing control grids first to prevent duplicates
+        const pathogenGridsContainer = document.getElementById('pathogenControlGrids');
+        if (pathogenGridsContainer) {
+            pathogenGridsContainer.innerHTML = '';
+            pathogenGridsContainer.style.display = 'none';
+        }
+        
+        // Use real pathogen grid system for multi-fluorophore fresh uploads
+        if (window.showPathogenGridsWithData && typeof window.showPathogenGridsWithData === 'function') {
+            console.log('🔍 MULTI-FLUOROPHORE - Using real pathogen grids system');
+            setTimeout(() => {
+                window.showPathogenGridsWithData(testCode, []);
+            }, 100);
+        } else {
+            console.log('🔍 MULTI-FLUOROPHORE - Fallback to universal control grid');
+            setTimeout(() => {
+                createUniversalControlGrid(testCode, results.individual_results);
+            }, 100);
+        }
     } else {
-        console.log('🔍 Could not extract test code from pattern:', experimentPattern);
+        console.log('🔍 MULTI-FLUOROPHORE - Could not extract test code from pattern:', experimentPattern);
     }
     
     // Match curve details size to analysis summary
@@ -4131,16 +4151,30 @@ async function loadSessionDetails(sessionId) {
         displayMultiFluorophoreResults(transformedResults);
         
         // Create control grids for loaded session
-        console.log('🔍 Creating control grids for loaded session');
+        console.log('🔍 HISTORY LOAD - Creating control grids for loaded session');
         const sessionTestCode = extractTestCodeFromResults(transformedResults) || extractTestCodeFromExperimentPattern(session.filename);
         if (sessionTestCode) {
-            console.log('🔍 Extracted test code for loaded session:', sessionTestCode);
+            console.log('🔍 HISTORY LOAD - Extracted test code for loaded session:', sessionTestCode);
+            // Clear any existing control grids first to prevent duplicates
+            const pathogenGridsContainer = document.getElementById('pathogenControlGrids');
+            if (pathogenGridsContainer) {
+                pathogenGridsContainer.innerHTML = '';
+                pathogenGridsContainer.style.display = 'none';
+            }
+            
+            // Also clear the old pathogen grids section
+            const pathogenGridsSection = document.getElementById('pathogen-grids-section');
+            if (pathogenGridsSection) {
+                pathogenGridsSection.innerHTML = '';
+                pathogenGridsSection.style.display = 'none';
+            }
+            
             // Delay to ensure DOM is ready and displayMultiFluorophoreResults has completed
             setTimeout(() => {
                 createUniversalControlGrid(sessionTestCode, transformedResults.individual_results);
             }, 200);
         } else {
-            console.log('🔍 Could not extract test code from loaded session:', session.filename);
+            console.log('🔍 HISTORY LOAD - Could not extract test code from loaded session:', session.filename);
         }
         
         // Trigger enhanced control validation display
@@ -4653,6 +4687,10 @@ function createUniversalControlGrid(testCode, individualResults) {
         console.log('🔍 UNIVERSAL GRID - Container not found');
         return;
     }
+    
+    // Clear any existing content to prevent duplicates
+    pathogenGridsContainer.innerHTML = '';
+    pathogenGridsContainer.style.display = 'none';
     
     // Get pathogen mapping for this test
     const pathogenMapping = getPathogenMappingForTest ? getPathogenMappingForTest(testCode) : null;
@@ -6478,12 +6516,13 @@ function updateControlValidationDisplay(controlSets) {
     const anyControlsFound = Object.values(controlSets).some(set => 
         Object.values(set).some(typeArray => typeArray.length > 0)
     );
-    
+
     if (anyControlsFound) {
-        // Create individual pathogen control grids
-        createPathogenControlGrids(controlSets);
+        // DISABLED: Create individual pathogen control grids to prevent duplicates
+        // createPathogenControlGrids(controlSets);
+        console.log('🔍 CONTROL VALIDATION - Skipping pathogen control grids creation to prevent duplicates');
     }
-    
+
     // Legacy control validation section (can be hidden now)
     const controlValidationSection = document.getElementById('controlValidation');
     if (controlValidationSection) {
