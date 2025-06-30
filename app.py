@@ -244,18 +244,44 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                 well_result.baseline = float(well_data.get('baseline', 0)) if well_data.get('baseline') is not None else None
                 well_result.data_points = int(well_data.get('data_points', 0)) if well_data.get('data_points') is not None else None
                 well_result.cycle_range = float(well_data.get('cycle_range', 0)) if well_data.get('cycle_range') is not None else None
-                # JSON/text fields
-                import json
-                well_result.fit_parameters = json.dumps(well_data.get('fit_parameters', [])) if well_data.get('fit_parameters') is not None else None
-                well_result.parameter_errors = json.dumps(well_data.get('parameter_errors', [])) if well_data.get('parameter_errors') is not None else None
-                well_result.fitted_curve = json.dumps(well_data.get('fitted_curve', [])) if well_data.get('fitted_curve') is not None else None
-                well_result.anomalies = json.dumps(well_data.get('anomalies', [])) if well_data.get('anomalies') is not None else None
-                well_result.raw_cycles = json.dumps(well_data.get('raw_cycles', [])) if well_data.get('raw_cycles') is not None else None
-                well_result.raw_rfu = json.dumps(well_data.get('raw_rfu', [])) if well_data.get('raw_rfu') is not None else None
+                # JSON/text fields - ensure they are converted to JSON strings for database storage
+                # Helper function to safely serialize to JSON, avoiding double-encoding
+                def safe_json_dumps(value, default=None):
+                    if value is None:
+                        return None
+                    # If already a string, assume it's already JSON-encoded
+                    if isinstance(value, str):
+                        try:
+                            # Validate it's valid JSON
+                            json.loads(value)
+                            return value
+                        except (json.JSONDecodeError, TypeError):
+                            # If not valid JSON, treat as a raw string and encode it
+                            return json.dumps(value)
+                    # Otherwise, serialize the object/list to JSON
+                    return json.dumps(value if value is not None else default)
+                
+                well_result.fit_parameters = safe_json_dumps(well_data.get('fit_parameters'), [])
+                well_result.parameter_errors = safe_json_dumps(well_data.get('parameter_errors'), [])
+                well_result.fitted_curve = safe_json_dumps(well_data.get('fitted_curve'), [])
+                well_result.anomalies = safe_json_dumps(well_data.get('anomalies'), [])
+                well_result.raw_cycles = safe_json_dumps(well_data.get('raw_cycles'), [])
+                well_result.raw_rfu = safe_json_dumps(well_data.get('raw_rfu'), [])
                 well_result.sample_name = str(well_data.get('sample_name', '')) if well_data.get('sample_name') else None
                 well_result.cq_value = float(well_data.get('cq_value', 0)) if well_data.get('cq_value') is not None else None
                 # Set fluorophore if present
                 well_result.fluorophore = str(well_data.get('fluorophore', '')) if well_data.get('fluorophore') else None
+                
+                # Set threshold_value if present
+                threshold_value = well_data.get('threshold_value')
+                if threshold_value is not None:
+                    try:
+                        well_result.threshold_value = float(threshold_value)
+                    except (ValueError, TypeError):
+                        well_result.threshold_value = None
+                else:
+                    well_result.threshold_value = None
+                    
                 db.session.add(well_result)
                 db.session.flush()  # Force write to DB after each well
                 well_count += 1
@@ -456,15 +482,20 @@ def get_sessions():
     try:
         sessions = AnalysisSession.query.order_by(AnalysisSession.upload_timestamp.desc()).all()
         sessions_data = []
-        
         for session in sessions:
             session_dict = session.to_dict()
-            # Return individual_results as a dict keyed by well_id for frontend compatibility
-            individual_results = {}
-            for well in session.well_results:
-                well_dict = well.to_dict()
-                individual_results[well_dict['well_id']] = well_dict
-            session_dict['individual_results'] = individual_results
+            # Robustly handle both dict and list for well_results
+            individual_results = session.well_results
+            # Convert to dict keyed by well_id if not already
+            if isinstance(individual_results, dict):
+                results_dict = individual_results
+            else:
+                results_dict = {}
+                for well in individual_results:
+                    well_dict = well.to_dict() if hasattr(well, 'to_dict') else well
+                    if isinstance(well_dict, dict) and 'well_id' in well_dict:
+                        results_dict[well_dict['well_id']] = well_dict
+            session_dict['individual_results'] = results_dict
             sessions_data.append(session_dict)
         return jsonify({
             'sessions': sessions_data,
@@ -479,14 +510,19 @@ def get_session_details(session_id):
     try:
         session = AnalysisSession.query.get_or_404(session_id)
         wells = WellResult.query.filter_by(session_id=session_id).all()
-        # Return individual_results as a dict keyed by well_id for frontend compatibility
-        individual_results = {}
-        for well in wells:
-            well_dict = well.to_dict()
-            individual_results[well_dict['well_id']] = well_dict
+        # Robustly handle both dict and list for wells
+        if isinstance(wells, dict):
+            results_dict = wells
+        else:
+            results_dict = {}
+            for well in wells:
+                well_dict = well.to_dict() if hasattr(well, 'to_dict') else well
+                if isinstance(well_dict, dict) and 'well_id' in well_dict:
+                    results_dict[well_dict['well_id']] = well_dict
         return jsonify({
             'session': session.to_dict(),
-            'individual_results': individual_results
+            'wells': [well.to_dict() for well in wells],
+            'individual_results': results_dict
         })
     except Exception as e:
         return jsonify({'error': f'Database error: {str(e)}'}), 500
@@ -668,9 +704,42 @@ def save_combined_session():
                 well_result.well_id = well_key
                 well_result.is_good_scurve = bool(well_data.get('is_good_scurve', False))
                 well_result.r2_score = float(well_data.get('r2_score', 0)) if well_data.get('r2_score') is not None else None
+                well_result.rmse = float(well_data.get('rmse', 0)) if well_data.get('rmse') is not None else None
+                well_result.amplitude = float(well_data.get('amplitude', 0)) if well_data.get('amplitude') is not None else None
+                well_result.steepness = float(well_data.get('steepness', 0)) if well_data.get('steepness') is not None else None
+                well_result.midpoint = float(well_data.get('midpoint', 0)) if well_data.get('midpoint') is not None else None
+                well_result.baseline = float(well_data.get('baseline', 0)) if well_data.get('baseline') is not None else None
+                well_result.data_points = int(well_data.get('data_points', 0)) if well_data.get('data_points') is not None else None
+                well_result.cycle_range = float(well_data.get('cycle_range', 0)) if well_data.get('cycle_range') is not None else None
+                
+                # JSON/text fields - ensure they are converted to JSON strings for database storage
+                # Helper function to safely serialize to JSON, avoiding double-encoding
+                def safe_json_dumps(value, default=None):
+                    if value is None:
+                        return None
+                    # If already a string, assume it's already JSON-encoded
+                    if isinstance(value, str):
+                        try:
+                            # Validate it's valid JSON
+                            json.loads(value)
+                            return value
+                        except (json.JSONDecodeError, TypeError):
+                            # If not valid JSON, treat as a raw string and encode it
+                            return json.dumps(value)
+                    # Otherwise, serialize the object/list to JSON
+                    return json.dumps(value if value is not None else default)
+                
+                well_result.fit_parameters = safe_json_dumps(well_data.get('fit_parameters'), [])
+                well_result.parameter_errors = safe_json_dumps(well_data.get('parameter_errors'), [])
+                well_result.fitted_curve = safe_json_dumps(well_data.get('fitted_curve'), [])
+                well_result.anomalies = safe_json_dumps(well_data.get('anomalies'), [])
+                well_result.raw_cycles = safe_json_dumps(well_data.get('raw_cycles'), [])
+                well_result.raw_rfu = safe_json_dumps(well_data.get('raw_rfu'), [])
+                
                 well_result.sample_name = str(well_data.get('sample_name', '')) if well_data.get('sample_name') else None
                 well_result.cq_value = float(well_data.get('cq_value', 0)) if well_data.get('cq_value') is not None else None
-                # ...existing code for all other well_result fields...
+                well_result.fluorophore = str(well_data.get('fluorophore', '')) if well_data.get('fluorophore') else None
+                
                 # Set threshold_value if present
                 threshold_value = well_data.get('threshold_value')
                 if threshold_value is not None:

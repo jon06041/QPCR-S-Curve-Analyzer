@@ -733,20 +733,27 @@ async function displayAnalysisResults(results) {
     displayControlValidationAlerts(controlIssues);
     
     // Display pathogen control grids for visual validation
-    const testCode = extractTestCode(experimentPattern);
-    console.log('🔍 PATHOGEN GRIDS - Function check:', {
+    const testCode = extractTestCodeFromExperimentPattern(experimentPattern);
+    console.log('🔍 INDIVIDUAL CHANNEL - Function check:', {
         'window.showPathogenGridsWithData exists': !!window.showPathogenGridsWithData,
         'typeof': typeof window.showPathogenGridsWithData,
         'testCode': testCode
     });
     
     if (window.showPathogenGridsWithData && typeof window.showPathogenGridsWithData === 'function') {
-        console.log('🔍 PATHOGEN GRIDS - Calling showPathogenGridsWithData for testCode:', testCode);
+        console.log('🔍 INDIVIDUAL CHANNEL - Calling showPathogenGridsWithData for testCode:', testCode);
         window.showPathogenGridsWithData(testCode, controlIssues);
     } else {
-        console.log('🔍 PATHOGEN GRIDS - showPathogenGridsWithData function not available, using fallback');
+        console.log('🔍 INDIVIDUAL CHANNEL - showPathogenGridsWithData function not available, using fallback');
         // Universal fallback: create basic control grid for any test type
-        createUniversalControlGrid(testCode, individualResults);
+        if (testCode) {
+            // Delay slightly to ensure DOM is ready
+            setTimeout(() => {
+                createUniversalControlGrid(testCode, individualResults);
+            }, 100);
+        } else {
+            console.log('🔍 INDIVIDUAL CHANNEL - Could not extract test code from pattern:', experimentPattern);
+        }
     }
     
     populateWellSelector(individualResults);
@@ -845,6 +852,19 @@ async function displayMultiFluorophoreResults(results) {
     // Populate well selector and results table
     populateWellSelector(results.individual_results);
     populateResultsTable(results.individual_results);
+    
+    // Create control grids for fresh analysis
+    console.log('🔍 Creating control grids for fresh multi-fluorophore analysis');
+    const testCode = extractTestCodeFromExperimentPattern(experimentPattern);
+    if (testCode) {
+        console.log('🔍 Extracted test code for control grids:', testCode);
+        // Delay slightly to ensure DOM is ready
+        setTimeout(() => {
+            createUniversalControlGrid(testCode, results.individual_results);
+        }, 100);
+    } else {
+        console.log('🔍 Could not extract test code from pattern:', experimentPattern);
+    }
     
     // Match curve details size to analysis summary
     matchCurveDetailsSize();
@@ -4073,7 +4093,9 @@ async function loadSessionDetails(sessionId) {
                     } catch (e) {
                         return {};
                     }
-                })()
+                })(),
+                // Add missing threshold_value field for threshold annotations
+                threshold_value: well.threshold_value
             };
         });
         
@@ -4108,10 +4130,23 @@ async function loadSessionDetails(sessionId) {
         // Display using multi-fluorophore layout (handles both single and multi-channel)
         displayMultiFluorophoreResults(transformedResults);
         
-        // Trigger enhanced control validation display instead of redundant grids
+        // Create control grids for loaded session
+        console.log('🔍 Creating control grids for loaded session');
+        const sessionTestCode = extractTestCodeFromResults(transformedResults) || extractTestCodeFromExperimentPattern(session.filename);
+        if (sessionTestCode) {
+            console.log('🔍 Extracted test code for loaded session:', sessionTestCode);
+            // Delay to ensure DOM is ready and displayMultiFluorophoreResults has completed
+            setTimeout(() => {
+                createUniversalControlGrid(sessionTestCode, transformedResults.individual_results);
+            }, 200);
+        } else {
+            console.log('🔍 Could not extract test code from loaded session:', session.filename);
+        }
+        
+        // Trigger enhanced control validation display
         setTimeout(() => {
             enhanceControlValidationWithPathogenInfo();
-        }, 100);
+        }, 300);
         
         // Reset filter state when loading from history
         resetFilterState();
@@ -8725,6 +8760,25 @@ function extractControlType(sampleName) {
     if (controlMatch) {
         return controlMatch[0].split('-')[0];
     }
+    return null;
+}
+
+function extractTestCodeFromExperimentPattern(experimentPattern) {
+    if (!experimentPattern) return null;
+    
+    console.log('🔍 Extracting test code from experiment pattern:', experimentPattern);
+    
+    // Extract test code from experiment pattern
+    if (experimentPattern.includes('BVAB') || experimentPattern.includes('AcBVAB')) return 'BVAB';
+    if (experimentPattern.includes('BVPanelPCR3') || experimentPattern.includes('AcBVPanelPCR3')) return 'BVPanelPCR3';
+    if (experimentPattern.includes('Cglab') || experimentPattern.includes('AcCglab')) return 'Cglab';
+    if (experimentPattern.includes('Ngon') || experimentPattern.includes('AcNgon')) return 'Ngon';
+    if (experimentPattern.includes('Ctrach') || experimentPattern.includes('AcCtrach')) return 'Ctrach';
+    if (experimentPattern.includes('Tvag') || experimentPattern.includes('AcTvag')) return 'Tvag';
+    if (experimentPattern.includes('Mgen') || experimentPattern.includes('AcMgen')) return 'Mgen';
+    if (experimentPattern.includes('Upar') || experimentPattern.includes('AcUpar')) return 'Upar';
+    if (experimentPattern.includes('Uure') || experimentPattern.includes('AcUure')) return 'Uure';
+    
     return null;
 }
 

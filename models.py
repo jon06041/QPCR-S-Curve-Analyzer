@@ -82,6 +82,23 @@ class WellResult(db.Model):
         if fluorophore == 'Unknown' and self.well_id and '_' in self.well_id:
             fluorophore = self.well_id.split('_')[1]
         
+        # Robust JSON parsing with fallback to [] or {}
+        def parse_json_array(val):
+            try:
+                if val is None:
+                    return []
+                parsed = json.loads(val) if isinstance(val, str) else val
+                return parsed if isinstance(parsed, list) else []
+            except Exception:
+                return []
+        def parse_json_object(val):
+            try:
+                if val is None:
+                    return {}
+                parsed = json.loads(val) if isinstance(val, str) else val
+                return parsed if isinstance(parsed, dict) else {}
+            except Exception:
+                return {}
         return {
             'id': self.id,
             'session_id': self.session_id,
@@ -96,12 +113,12 @@ class WellResult(db.Model):
             'baseline': self.baseline,
             'data_points': self.data_points,
             'cycle_range': self.cycle_range,
-            'fit_parameters': json.loads(self.fit_parameters) if self.fit_parameters else None,
-            'parameter_errors': json.loads(self.parameter_errors) if self.parameter_errors else None,
-            'fitted_curve': json.loads(self.fitted_curve) if self.fitted_curve else None,
-            'anomalies': json.loads(self.anomalies) if self.anomalies else [],
-            'raw_cycles': json.loads(self.raw_cycles) if self.raw_cycles else None,
-            'raw_rfu': json.loads(self.raw_rfu) if self.raw_rfu else None,
+            'fit_parameters': parse_json_object(self.fit_parameters),
+            'parameter_errors': parse_json_object(self.parameter_errors),
+            'fitted_curve': parse_json_array(self.fitted_curve),
+            'anomalies': parse_json_array(self.anomalies),
+            'raw_cycles': parse_json_array(self.raw_cycles),
+            'raw_rfu': parse_json_array(self.raw_rfu),
             'cq_value': self.cq_value,
             'sample_name': self.sample_name,
             'threshold_value': self.threshold_value
