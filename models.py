@@ -64,6 +64,7 @@ class WellResult(db.Model):
     raw_rfu = db.Column(db.Text)  # JSON string
     cq_value = db.Column(db.Float)  # Integrated Cq value
     sample_name = db.Column(db.String(255))  # Integrated sample name
+    threshold_value = db.Column(db.Float)  # Threshold value for annotation
     
     def to_dict(self):
         # Get fluorophore from dedicated column first
@@ -102,7 +103,8 @@ class WellResult(db.Model):
             'raw_cycles': json.loads(self.raw_cycles) if self.raw_cycles else None,
             'raw_rfu': json.loads(self.raw_rfu) if self.raw_rfu else None,
             'cq_value': self.cq_value,
-            'sample_name': self.sample_name
+            'sample_name': self.sample_name,
+            'threshold_value': self.threshold_value
         }
     
     @classmethod

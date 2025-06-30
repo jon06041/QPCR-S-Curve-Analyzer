@@ -31,28 +31,44 @@ function showPathogenGridsWithData(testCode, controlSets) {
     } else if (testCode === 'Ngon') {
         createTabbedPathogenGrids(container, 'Ngon', controlValidationData);
     } else {
-        // Fallback to static grids for unknown test codes
-        showPathogenGrids(testCode);
+        // Fallback: static grid function not defined, show message
+        console.warn('No static grid fallback available for testCode:', testCode);
+        const fallbackDiv = document.createElement('div');
+        fallbackDiv.className = 'no-static-grid-warning';
+        fallbackDiv.innerHTML = `<p style="color: #b00; font-weight: bold;">No static grid available for test code: <code>${testCode}</code></p>`;
+        container.appendChild(fallbackDiv);
     }
 }
 
 function getRealControlValidationData() {
     console.log('🔍 CONTROL GRID DATA - Starting real control validation data extraction');
     console.log('🔍 CONTROL GRID DATA - Current analysis results available:', !!window.currentAnalysisResults);
-    console.log('🔍 CONTROL GRID DATA - Analysis results count:', window.currentAnalysisResults ? window.currentAnalysisResults.length : 0);
+    // Support both array and object for window.currentAnalysisResults
+    let wellsArray = [];
+    if (Array.isArray(window.currentAnalysisResults)) {
+        wellsArray = window.currentAnalysisResults;
+    } else if (window.currentAnalysisResults && typeof window.currentAnalysisResults === 'object') {
+        if (window.currentAnalysisResults.individual_results && typeof window.currentAnalysisResults.individual_results === 'object') {
+            wellsArray = Object.values(window.currentAnalysisResults.individual_results);
+        } else {
+            wellsArray = Object.values(window.currentAnalysisResults);
+        }
+    }
+    // Patch: always use wellsArray for iteration, never call forEach on window.currentAnalysisResults directly
+    console.log('🔍 CONTROL GRID DATA - Analysis results count:', wellsArray.length);
     const controlData = {};
     
-    if (!window.currentAnalysisResults || window.currentAnalysisResults.length === 0) {
+    if (!wellsArray || wellsArray.length === 0) {
         console.log('🔍 CONTROL DATA - No current analysis results available');
         return controlData;
     }
     
     // First, show all unique sample names for debugging
-    const allSampleNames = [...new Set(window.currentAnalysisResults.map(w => w.sample_name || 'UNNAMED'))];
+    const allSampleNames = [...new Set(wellsArray.map(w => w.sample_name || 'UNNAMED'))];
     console.log('🔍 CONTROL DATA - All sample names in session:', allSampleNames.slice(0, 50));
     
     // Show wells with their coordinates and sample names for debugging
-    const wellsWithCoords = window.currentAnalysisResults.slice(0, 20).map(w => ({
+    const wellsWithCoords = wellsArray.slice(0, 20).map(w => ({
         wellId: w.well_id,
         coordinate: w.well_id ? w.well_id.split('_')[0] : 'Unknown',
         sampleName: w.sample_name,
@@ -69,7 +85,7 @@ function getRealControlValidationData() {
     
     // Group wells by coordinate to detect control sets
     const wellsByCoordinate = {};
-    window.currentAnalysisResults.forEach(well => {
+    wellsArray.forEach(well => {
         const coordinate = well.well_id ? well.well_id.split('_')[0] : 'Unknown';
         if (!wellsByCoordinate[coordinate]) {
             wellsByCoordinate[coordinate] = [];
@@ -84,30 +100,23 @@ function getRealControlValidationData() {
         const match = sampleName.match(/^(Ac[A-Za-z]+)/);
         return match ? match[1] : 'AcBVAB';
     }
-    
-    const testPattern = window.currentAnalysisResults && window.currentAnalysisResults.length > 0 ? 
-        extractTestPattern(window.currentAnalysisResults[0].sample_name || '') : 'AcBVAB';
-    
+    const testPattern = wellsArray && wellsArray.length > 0 ? 
+        extractTestPattern(wellsArray[0].sample_name || '') : 'AcBVAB';
     const controlSamples = [];
-    
-    if (window.currentAnalysisResults) {
-        window.currentAnalysisResults.forEach(well => {
-            const sampleName = well.sample_name || '';
-            const coordinate = well.well_id ? well.well_id.split('_')[0] : 'Unknown';
-            const fluorophore = well.well_id ? well.well_id.split('_')[1] : 'Unknown';
-            
-            // Same logic as the results table filter: samples that start with test pattern
-            if (sampleName.startsWith(testPattern)) {
-                controlSamples.push({
-                    coordinate: coordinate,
-                    sampleName: sampleName,
-                    fluorophore: fluorophore,
-                    amplitude: well.amplitude || 0,
-                    wellId: well.well_id
-                });
-            }
-        });
-    }
+    wellsArray.forEach(well => {
+        const sampleName = well.sample_name || '';
+        const coordinate = well.well_id ? well.well_id.split('_')[0] : 'Unknown';
+        const fluorophore = well.well_id ? well.well_id.split('_')[1] : 'Unknown';
+        if (sampleName.startsWith(testPattern)) {
+            controlSamples.push({
+                coordinate: coordinate,
+                sampleName: sampleName,
+                fluorophore: fluorophore,
+                amplitude: well.amplitude || 0,
+                wellId: well.well_id
+            });
+        }
+    });
     
     console.log('🔍 CONTROL DATA - Real control samples found (from results table logic):');
     console.log(`🔍 Test pattern: "${testPattern}"`);
@@ -187,42 +196,32 @@ function getRealControlValidationData() {
     console.log('🔍 CONTROL DATA - Coordinate to control mapping:', coordinateToControlInfo);
     
     // Extract control samples from current analysis results using coordinate mapping
-    window.currentAnalysisResults.forEach(well => {
+    wellsArray.forEach(well => {
         const sampleName = well.sample_name || '';
         const amplitude = well.amplitude || 0;
         const fluorophore = well.well_id ? well.well_id.split('_')[1] : 'Unknown';
         const coordinate = well.well_id ? well.well_id.split('_')[0] : 'Unknown';
-        
-        // Check if this coordinate is a known control coordinate
         const controlInfo = coordinateToControlInfo[coordinate];
         if (controlInfo) {
-            // Use coordinate-based control type (more reliable than sample name parsing)
             const controlType = controlInfo.type;
             const setNumber = controlInfo.set;
-            
-            if (controlType) {
-                const key = `${fluorophore}_${controlType}_${setNumber}`;
-                
-                // Determine validation status using complete well data
-                const expected = getExpectedResult(controlType);
-                const actual = getActualResult(well);
-                const isValid = (expected === actual);
-                
-                controlData[key] = {
-                    fluorophore: fluorophore,
-                    controlType: controlType,
-                    setNumber: setNumber,
-                    sampleName: sampleName,
-                    amplitude: amplitude,
-                    expected: expected,
-                    actual: actual,
-                    isValid: isValid,
-                    wellId: well.well_id,
-                    coordinate: coordinate
-                };
-                
-                console.log(`🔍 CONTROL DATA - Found coordinate-based control: ${key}`, controlData[key]);
-            }
+            const key = `${fluorophore}_${controlType}_${setNumber}`;
+            const expected = getExpectedResult(controlType);
+            const actual = getActualResult(well);
+            const isValid = (expected === actual);
+            controlData[key] = {
+                fluorophore: fluorophore,
+                controlType: controlType,
+                setNumber: setNumber,
+                sampleName: sampleName,
+                amplitude: amplitude,
+                expected: expected,
+                actual: actual,
+                isValid: isValid,
+                wellId: well.well_id,
+                coordinate: coordinate
+            };
+            console.log(`🔍 CONTROL DATA - Found coordinate-based control: ${key}`, controlData[key]);
         }
         
         // Fallback: try pattern-based detection for other naming formats

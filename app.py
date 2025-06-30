@@ -227,258 +227,55 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             results_items = []
         
         for well_key, well_data in results_items:
+            # Ensure well_data is a dictionary
+            if not isinstance(well_data, dict):
+                print(f"Warning: well_data for {well_key} is not a dict: {type(well_data)}")
+                continue
             try:
-                # Ensure well_data is a dictionary
-                if not isinstance(well_data, dict):
-                    print(f"Warning: well_data for {well_key} is not a dict: {type(well_data)}")
-                    continue
-                
-                # Enhanced debugging for problematic wells
-                if well_key in ['N20', 'N21', 'N22', 'O1', 'P1']:
-                    print(f"\n=== DEBUGGING WELL {well_key} ===")
-                    print(f"well_data type: {type(well_data)}")
-                    if isinstance(well_data, dict):
-                        print(f"well_data keys: {list(well_data.keys())}")
-                        
-                        # Check each field that could cause the list index error
-                        problematic_fields = ['parameter_errors', 'fit_parameters', 'raw_cycles', 'raw_rfu', 'fitted_curve', 'anomalies']
-                        for field in problematic_fields:
-                            if field in well_data:
-                                value = well_data[field]
-                                print(f"  {field}: {type(value)}")
-                                if isinstance(value, list):
-                                    print(f"    LIST length: {len(value)}")
-                                    if len(value) > 0:
-                                        print(f"    First few items: {[type(x) for x in value[:3]]}")
-                                        for i, item in enumerate(value[:2]):
-                                            if hasattr(item, '__getitem__'):
-                                                try:
-                                                    # This might trigger the error
-                                                    test_access = item['test'] if isinstance(item, dict) else item[0]
-                                                    print(f"    [{i}] dict/list access OK")
-                                                except Exception as e:
-                                                    print(f"    [{i}] ERROR: {e}")
-                                elif isinstance(value, dict):
-                                    print(f"    DICT keys: {list(value.keys())}")
-                                else:
-                                    print(f"    VALUE: {str(value)[:50]}")
-                    print("=== END DEBUG ===\n")
-                
                 well_result = WellResult()
                 well_result.session_id = session.id
                 well_result.well_id = well_key
                 well_result.is_good_scurve = bool(well_data.get('is_good_scurve', False))
                 well_result.r2_score = float(well_data.get('r2_score', 0)) if well_data.get('r2_score') is not None else None
+                well_result.rmse = float(well_data.get('rmse', 0)) if well_data.get('rmse') is not None else None
+                well_result.amplitude = float(well_data.get('amplitude', 0)) if well_data.get('amplitude') is not None else None
+                well_result.steepness = float(well_data.get('steepness', 0)) if well_data.get('steepness') is not None else None
+                well_result.midpoint = float(well_data.get('midpoint', 0)) if well_data.get('midpoint') is not None else None
+                well_result.baseline = float(well_data.get('baseline', 0)) if well_data.get('baseline') is not None else None
+                well_result.data_points = int(well_data.get('data_points', 0)) if well_data.get('data_points') is not None else None
+                well_result.cycle_range = float(well_data.get('cycle_range', 0)) if well_data.get('cycle_range') is not None else None
+                # JSON/text fields
+                import json
+                well_result.fit_parameters = json.dumps(well_data.get('fit_parameters', [])) if well_data.get('fit_parameters') is not None else None
+                well_result.parameter_errors = json.dumps(well_data.get('parameter_errors', [])) if well_data.get('parameter_errors') is not None else None
+                well_result.fitted_curve = json.dumps(well_data.get('fitted_curve', [])) if well_data.get('fitted_curve') is not None else None
+                well_result.anomalies = json.dumps(well_data.get('anomalies', [])) if well_data.get('anomalies') is not None else None
+                well_result.raw_cycles = json.dumps(well_data.get('raw_cycles', [])) if well_data.get('raw_cycles') is not None else None
+                well_result.raw_rfu = json.dumps(well_data.get('raw_rfu', [])) if well_data.get('raw_rfu') is not None else None
                 well_result.sample_name = str(well_data.get('sample_name', '')) if well_data.get('sample_name') else None
                 well_result.cq_value = float(well_data.get('cq_value', 0)) if well_data.get('cq_value') is not None else None
-                
-                # Set fluorophore information in fit_parameters - FIXED LIST/DICT HANDLING
-                fit_params = well_data.get('fit_parameters', [])
-                if isinstance(fit_params, list) and len(fit_params) >= 4:
-                    # Analyzer returns list: [L, k, x0, B]
-                    # Convert to dict with fluorophore info
-                    try:
-                        param_dict = {
-                            'L': float(fit_params[0]) if len(fit_params) > 0 else 0.0,
-                            'k': float(fit_params[1]) if len(fit_params) > 1 else 0.0,
-                            'x0': float(fit_params[2]) if len(fit_params) > 2 else 0.0,
-                            'B': float(fit_params[3]) if len(fit_params) > 3 else 0.0,
-                            'fluorophore': fluorophore
-                        }
-                        well_result.fit_parameters = json.dumps(param_dict)
-                    except (ValueError, TypeError, IndexError):
-                        well_result.fit_parameters = json.dumps({'fluorophore': fluorophore})
-                elif isinstance(fit_params, dict):
-                    # Already a dict, just add fluorophore
-                    fit_params['fluorophore'] = fluorophore
-                    well_result.fit_parameters = json.dumps(fit_params)
-                elif isinstance(fit_params, str):
-                    try:
-                        parsed_params = json.loads(fit_params)
-                        if isinstance(parsed_params, dict):
-                            parsed_params['fluorophore'] = fluorophore
-                            well_result.fit_parameters = json.dumps(parsed_params)
-                        else:
-                            well_result.fit_parameters = json.dumps({'fluorophore': fluorophore})
-                    except json.JSONDecodeError:
-                        well_result.fit_parameters = json.dumps({'fluorophore': fluorophore})
-                else:
-                    well_result.fit_parameters = json.dumps({'fluorophore': fluorophore})
-                
-                # Save curve parameters with enhanced error handling
-                try:
-                    well_result.rmse = float(well_data.get('rmse', 0)) if well_data.get('rmse') is not None else None
-                except Exception as e:
-                    if well_key in ['N20', 'N21', 'N22', 'O1', 'P1']:
-                        print(f"RMSE error for {well_key}: {e}, value: {well_data.get('rmse')} type: {type(well_data.get('rmse'))}")
-                    well_result.rmse = None
-                
-                try:
-                    well_result.amplitude = float(well_data.get('amplitude', 0)) if well_data.get('amplitude') is not None else None
-                except Exception as e:
-                    if well_key in ['N20', 'N21', 'N22', 'O1', 'P1']:
-                        print(f"Amplitude error for {well_key}: {e}, value: {well_data.get('amplitude')} type: {type(well_data.get('amplitude'))}")
-                    well_result.amplitude = None
-                
-                try:
-                    well_result.steepness = float(well_data.get('steepness', 0)) if well_data.get('steepness') is not None else None
-                except Exception as e:
-                    if well_key in ['N20', 'N21', 'N22', 'O1', 'P1']:
-                        print(f"Steepness error for {well_key}: {e}, value: {well_data.get('steepness')} type: {type(well_data.get('steepness'))}")
-                    well_result.steepness = None
-                
-                try:
-                    well_result.midpoint = float(well_data.get('midpoint', 0)) if well_data.get('midpoint') is not None else None
-                except Exception as e:
-                    if well_key in ['N20', 'N21', 'N22', 'O1', 'P1']:
-                        print(f"Midpoint error for {well_key}: {e}, value: {well_data.get('midpoint')} type: {type(well_data.get('midpoint'))}")
-                    well_result.midpoint = None
-                
-                try:
-                    well_result.baseline = float(well_data.get('baseline', 0)) if well_data.get('baseline') is not None else None
-                except Exception as e:
-                    if well_key in ['N20', 'N21', 'N22', 'O1', 'P1']:
-                        print(f"Baseline error for {well_key}: {e}, value: {well_data.get('baseline')} type: {type(well_data.get('baseline'))}")
-                    well_result.baseline = None
-                
-                try:
-                    well_result.data_points = int(well_data.get('data_points', 0)) if well_data.get('data_points') is not None else None
-                except Exception as e:
-                    if well_key in ['N20', 'N21', 'N22', 'O1', 'P1']:
-                        print(f"Data points error for {well_key}: {e}, value: {well_data.get('data_points')} type: {type(well_data.get('data_points'))}")
-                    well_result.data_points = None
-                
-                try:
-                    well_result.cycle_range = float(well_data.get('cycle_range', 0)) if well_data.get('cycle_range') is not None else None
-                except Exception as e:
-                    if well_key in ['N20', 'N21', 'N22', 'O1', 'P1']:
-                        print(f"Cycle range error for {well_key}: {e}, value: {well_data.get('cycle_range')} type: {type(well_data.get('cycle_range'))}")
-                    well_result.cycle_range = None
-                
-                # Save chart data with enhanced validation
-                try:
-                    # Try multiple field names for cycles data
-                    raw_cycles = well_data.get('raw_cycles') or well_data.get('cycles') or well_data.get('x_data', [])
-                    if isinstance(raw_cycles, (list, tuple)) and len(raw_cycles) > 0:
-                        # Ensure all elements are numeric
-                        clean_cycles = []
-                        for i, x in enumerate(raw_cycles):
-                            try:
-                                if x is not None:
-                                    clean_cycles.append(float(x))
-                            except (ValueError, TypeError):
-                                print(f"Error converting cycle value at index {i}: {x} (type: {type(x)})")
-                                continue
-                        well_result.raw_cycles = json.dumps(clean_cycles)
-                    elif isinstance(raw_cycles, str):
-                        well_result.raw_cycles = raw_cycles
-                    else:
-                        well_result.raw_cycles = json.dumps([])
-                except Exception as e:
-                    print(f"Error processing cycles for {well_key}: {e}")
-                    import traceback
-                    print(f"Traceback: {traceback.format_exc()}")
-                    well_result.raw_cycles = json.dumps([])
-                
-                try:
-                    # Try multiple field names for RFU data
-                    raw_rfu = well_data.get('raw_rfu') or well_data.get('rfu') or well_data.get('y_data', [])
-                    if isinstance(raw_rfu, (list, tuple)) and len(raw_rfu) > 0:
-                        # Ensure all elements are numeric
-                        clean_rfu = []
-                        for i, x in enumerate(raw_rfu):
-                            try:
-                                if x is not None:
-                                    clean_rfu.append(float(x))
-                            except (ValueError, TypeError):
-                                if well_key in ['N20', 'N21', 'N22', 'O1', 'P1']:
-                                    print(f"RFU conversion error at index {i}: {x} (type: {type(x)})")
-                                continue
-                        well_result.raw_rfu = json.dumps(clean_rfu)
-                    elif isinstance(raw_rfu, str):
-                        well_result.raw_rfu = raw_rfu
-                    else:
-                        well_result.raw_rfu = json.dumps([])
-                except Exception as e:
-                    print(f"Error processing RFU for {well_key}: {e}")
-                    import traceback
-                    print(f"RFU Traceback: {traceback.format_exc()}")
-                    well_result.raw_rfu = json.dumps([])
-                
-                # Save additional analysis data with validation - FIXED LIST/DICT HANDLING
-                try:
-                    param_errors = well_data.get('parameter_errors', [])
-                    if isinstance(param_errors, list) and len(param_errors) >= 4:
-                        # Analyzer returns list: [L_err, k_err, x0_err, B_err]
-                        # Convert to dict with proper error handling
-                        try:
-                            param_dict = {
-                                'L': float(param_errors[0]) if len(param_errors) > 0 else 0.0,
-                                'k': float(param_errors[1]) if len(param_errors) > 1 else 0.0,
-                                'x0': float(param_errors[2]) if len(param_errors) > 2 else 0.0,
-                                'B': float(param_errors[3]) if len(param_errors) > 3 else 0.0
-                            }
-                            well_result.parameter_errors = json.dumps(param_dict)
-                        except (ValueError, TypeError, IndexError) as e:
-                            print(f"Error converting parameter_errors list for {well_key}: {e}")
-                            well_result.parameter_errors = json.dumps({})
-                    elif isinstance(param_errors, dict):
-                        # Already a dict, just clean values
-                        clean_dict = {}
-                        for key, value in param_errors.items():
-                            try:
-                                clean_dict[str(key)] = float(value) if value is not None else 0.0
-                            except (ValueError, TypeError):
-                                clean_dict[str(key)] = 0.0
-                        well_result.parameter_errors = json.dumps(clean_dict)
-                    else:
-                        well_result.parameter_errors = json.dumps({})
-                except Exception as e:
-                    print(f"Error processing parameter_errors for {well_key}: {e}")
-                    well_result.parameter_errors = json.dumps({})
-                
-                try:
-                    fitted_curve = well_data.get('fitted_curve', [])
-                    if isinstance(fitted_curve, (list, tuple)) and len(fitted_curve) > 0:
-                        clean_fitted = []
-                        for i, x in enumerate(fitted_curve):
-                            try:
-                                if x is not None:
-                                    clean_fitted.append(float(x))
-                            except (ValueError, TypeError):
-                                print(f"Error converting fitted_curve value at index {i}: {x} (type: {type(x)})")
-                                continue
-                        well_result.fitted_curve = json.dumps(clean_fitted)
-                    else:
-                        well_result.fitted_curve = json.dumps([])
-                except Exception as e:
-                    print(f"Error processing fitted_curve for {well_key}: {e}")
-                    import traceback
-                    print(f"Traceback: {traceback.format_exc()}")
-                    well_result.fitted_curve = json.dumps([])
-                
-                try:
-                    anomalies = well_data.get('anomalies', [])
-                    if isinstance(anomalies, (list, tuple)):
-                        well_result.anomalies = json.dumps(list(anomalies))
-                    else:
-                        well_result.anomalies = json.dumps([])
-                except Exception as e:
-                    print(f"Error processing anomalies for {well_key}: {e}")
-                    well_result.anomalies = json.dumps([])
-                
+                # Set fluorophore if present
+                well_result.fluorophore = str(well_data.get('fluorophore', '')) if well_data.get('fluorophore') else None
                 db.session.add(well_result)
+                db.session.flush()  # Force write to DB after each well
                 well_count += 1
-                
                 if well_count % 50 == 0:
                     db.session.commit()
-                    
-            except Exception as well_error:
-                print(f"Error saving well {well_key}: {well_error}")
+                print(f"[DB DEBUG] Saved well {well_key}: {well_result.to_dict()}")
+            except Exception as e:
+                print(f"Error saving well {well_key}: {e}")
                 continue
         
         # Final commit
-        db.session.commit()
+        # Final commit
+        try:
+            db.session.commit()
+            db.session.flush()
+            print(f"[DB DEBUG] Final commit done for {well_count} wells.")
+        except Exception as commit_error:
+            db.session.rollback()
+            print(f"Forced commit error: {commit_error}")
+            raise
         
         print(f"Individual channel session saved: {experiment_name} with {well_count} wells")
         return True
@@ -662,10 +459,13 @@ def get_sessions():
         
         for session in sessions:
             session_dict = session.to_dict()
-            # Include well_results for positive rate calculation
-            session_dict['well_results'] = [well.to_dict() for well in session.well_results]
+            # Return individual_results as a dict keyed by well_id for frontend compatibility
+            individual_results = {}
+            for well in session.well_results:
+                well_dict = well.to_dict()
+                individual_results[well_dict['well_id']] = well_dict
+            session_dict['individual_results'] = individual_results
             sessions_data.append(session_dict)
-        
         return jsonify({
             'sessions': sessions_data,
             'total': len(sessions)
@@ -679,10 +479,14 @@ def get_session_details(session_id):
     try:
         session = AnalysisSession.query.get_or_404(session_id)
         wells = WellResult.query.filter_by(session_id=session_id).all()
-        
+        # Return individual_results as a dict keyed by well_id for frontend compatibility
+        individual_results = {}
+        for well in wells:
+            well_dict = well.to_dict()
+            individual_results[well_dict['well_id']] = well_dict
         return jsonify({
             'session': session.to_dict(),
-            'wells': [well.to_dict() for well in wells]
+            'individual_results': individual_results
         })
     except Exception as e:
         return jsonify({'error': f'Database error: {str(e)}'}), 500
@@ -866,155 +670,30 @@ def save_combined_session():
                 well_result.r2_score = float(well_data.get('r2_score', 0)) if well_data.get('r2_score') is not None else None
                 well_result.sample_name = str(well_data.get('sample_name', '')) if well_data.get('sample_name') else None
                 well_result.cq_value = float(well_data.get('cq_value', 0)) if well_data.get('cq_value') is not None else None
-                
-                # Extract fluorophore from well_data or fluorophores list
-                fluorophore = well_data.get('fluorophore', 'Unknown')
-                
-                # If still Unknown, try to get from fluorophores list parameter
-                if fluorophore == 'Unknown' and fluorophores_list:
-                    fluorophore = fluorophores_list[0] if len(fluorophores_list) == 1 else 'Unknown'
-                
-                # For multi-fluorophore data, extract from well_key (A1_FAM -> FAM)
-                if '_' in well_key:
-                    parts = well_key.split('_')
-                    if len(parts) > 1:
-                        fluorophore = parts[-1]  # Take last part as fluorophore
-                
-                # Store fluorophore information properly - FIXED LIST/DICT HANDLING
-                fit_params = well_data.get('fit_parameters', [])
-                if isinstance(fit_params, list) and len(fit_params) >= 4:
-                    # Analyzer returns list: [L, k, x0, B] - convert to dict
+                # ...existing code for all other well_result fields...
+                # Set threshold_value if present
+                threshold_value = well_data.get('threshold_value')
+                if threshold_value is not None:
                     try:
-                        param_dict = {
-                            'L': float(fit_params[0]) if len(fit_params) > 0 else 0.0,
-                            'k': float(fit_params[1]) if len(fit_params) > 1 else 0.0,
-                            'x0': float(fit_params[2]) if len(fit_params) > 2 else 0.0,
-                            'B': float(fit_params[3]) if len(fit_params) > 3 else 0.0,
-                            'fluorophore': fluorophore
-                        }
-                        well_result.fit_parameters = json.dumps(param_dict)
-                    except (ValueError, TypeError, IndexError):
-                        well_result.fit_parameters = json.dumps({'fluorophore': fluorophore})
-                elif isinstance(fit_params, dict):
-                    # Already a dict, just add fluorophore
-                    fit_params['fluorophore'] = fluorophore
-                    well_result.fit_parameters = json.dumps(fit_params)
-                elif isinstance(fit_params, str):
-                    try:
-                        parsed_params = json.loads(fit_params)
-                        if isinstance(parsed_params, dict):
-                            parsed_params['fluorophore'] = fluorophore
-                            well_result.fit_parameters = json.dumps(parsed_params)
-                        else:
-                            well_result.fit_parameters = json.dumps({'fluorophore': fluorophore})
-                    except json.JSONDecodeError:
-                        well_result.fit_parameters = json.dumps({'fluorophore': fluorophore})
+                        well_result.threshold_value = float(threshold_value)
+                    except (ValueError, TypeError):
+                        well_result.threshold_value = None
                 else:
-                    well_result.fit_parameters = json.dumps({'fluorophore': fluorophore})
-                
-                # Save all curve parameters
-                well_result.rmse = float(well_data.get('rmse', 0)) if well_data.get('rmse') is not None else None
-                well_result.amplitude = float(well_data.get('amplitude', 0)) if well_data.get('amplitude') is not None else None
-                well_result.steepness = float(well_data.get('steepness', 0)) if well_data.get('steepness') is not None else None
-                well_result.midpoint = float(well_data.get('midpoint', 0)) if well_data.get('midpoint') is not None else None
-                well_result.baseline = float(well_data.get('baseline', 0)) if well_data.get('baseline') is not None else None
-                well_result.data_points = int(well_data.get('data_points', 0)) if well_data.get('data_points') is not None else None
-                well_result.cycle_range = float(well_data.get('cycle_range', 0)) if well_data.get('cycle_range') is not None else None
-                
-                # Safe chart data processing with enhanced validation
-                def safe_process_array_data(data, field_name):
-                    """Safely process array data that might be malformed"""
-                    if data is None:
-                        return json.dumps([])
-                    
-                    try:
-                        # Handle different data types
-                        if isinstance(data, dict):
-                            # If it's a dict, it might be malformed - skip it
-                            print(f"Warning: {field_name} for {well_key} is a dict, expected array")
-                            return json.dumps([])
-                        elif isinstance(data, (list, tuple)):
-                            # Validate all elements are numeric for cycles/rfu
-                            clean_data = []
-                            for i, item in enumerate(data):
-                                try:
-                                    if isinstance(item, (int, float)):
-                                        clean_data.append(float(item))
-                                    elif isinstance(item, str) and item.replace('.', '').replace('-', '').isdigit():
-                                        clean_data.append(float(item))
-                                except (ValueError, TypeError):
-                                    continue
-                            return json.dumps(clean_data)
-                        elif isinstance(data, str):
-                            # Try to parse as JSON first
-                            try:
-                                parsed = json.loads(data)
-                                if isinstance(parsed, list):
-                                    return json.dumps(parsed)
-                                elif isinstance(parsed, dict):
-                                    print(f"Warning: {field_name} for {well_key} parsed to dict, expected array")
-                                    return json.dumps([])
-                            except json.JSONDecodeError:
-                                pass
-                            return data if data.startswith('[') else json.dumps([])
-                        else:
-                            return json.dumps([])
-                    except Exception as e:
-                        print(f"Error processing {field_name} for {well_key}: {e}")
-                        print(f"Data type: {type(data)}, Data: {str(data)[:100]}")
-                        return json.dumps([])
-                
-                try:
-                    well_result.raw_cycles = safe_process_array_data(well_data.get('raw_cycles'), 'raw_cycles')
-                except Exception as e:
-                    print(f"Error in raw_cycles processing for {well_key}: {e}")
-                    print(f"Raw cycles data: {well_data.get('raw_cycles')}")
-                    well_result.raw_cycles = json.dumps([])
-                
-                try:
-                    well_result.raw_rfu = safe_process_array_data(well_data.get('raw_rfu'), 'raw_rfu')
-                except Exception as e:
-                    print(f"Error in raw_rfu processing for {well_key}: {e}")
-                    print(f"Raw RFU data: {well_data.get('raw_rfu')}")
-                    well_result.raw_rfu = json.dumps([])
-                
-                # Save additional analysis data - FIXED LIST/DICT HANDLING
-                try:
-                    param_errors = well_data.get('parameter_errors', [])
-                    if isinstance(param_errors, list) and len(param_errors) >= 4:
-                        # Convert list to dict format
-                        param_dict = {
-                            'L': float(param_errors[0]) if len(param_errors) > 0 else 0.0,
-                            'k': float(param_errors[1]) if len(param_errors) > 1 else 0.0,
-                            'x0': float(param_errors[2]) if len(param_errors) > 2 else 0.0,
-                            'B': float(param_errors[3]) if len(param_errors) > 3 else 0.0
-                        }
-                        well_result.parameter_errors = json.dumps(param_dict)
-                    elif isinstance(param_errors, dict):
-                        well_result.parameter_errors = json.dumps(param_errors)
-                    else:
-                        well_result.parameter_errors = json.dumps({})
-                except Exception as e:
-                    print(f"Error processing parameter_errors for {well_key}: {e}")
-                    well_result.parameter_errors = json.dumps({})
-                
-                # fitted_curve and anomalies are already properly formatted as lists
-                if well_data.get('fitted_curve'):
-                    well_result.fitted_curve = json.dumps(well_data['fitted_curve'])
-                if well_data.get('anomalies'):
-                    well_result.anomalies = json.dumps(well_data['anomalies'])
-                
+                    well_result.threshold_value = None
                 db.session.add(well_result)
                 well_count += 1
-                
                 if well_count % 50 == 0:
                     db.session.commit()
-                    
             except Exception as well_error:
                 print(f"Error saving well {well_key}: {well_error}")
                 continue
         
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception as commit_error:
+            db.session.rollback()
+            print(f"Forced commit error (combined): {commit_error}")
+            raise
         
         return jsonify({
             'success': True,
@@ -1028,22 +707,52 @@ def save_combined_session():
         print(f"Error saving combined session: {e}")
         return jsonify({'error': f'Failed to save combined session: {str(e)}'}), 500
 
-@app.route('/sessions/<int:session_id>', methods=['DELETE'])
-def delete_session(session_id):
-    """Delete a specific session and its results"""
+
+
+# --- Delete all sessions and their results ---
+@app.route('/sessions', methods=['DELETE'])
+def delete_all_sessions():
+    """Delete all analysis sessions and their results"""
     try:
-        session = AnalysisSession.query.get(session_id)
-        if not session:
-            return jsonify({'message': 'Session already deleted or does not exist'}), 200
-        
-        db.session.delete(session)  # Cascade will delete associated wells
+        num_sessions = AnalysisSession.query.count()
+        if num_sessions == 0:
+            return jsonify({'message': 'No sessions to delete'}), 200
+        # Delete all WellResults first (if not using cascade)
+        WellResult.query.delete()
+        AnalysisSession.query.delete()
         db.session.commit()
-        
-        return jsonify({'message': 'Session deleted successfully'})
+        print(f"[API] Deleted all sessions and well results from database.")
+        return jsonify({'message': f'All {num_sessions} sessions deleted successfully'})
     except Exception as e:
         db.session.rollback()
-        print(f"Error deleting session {session_id}: {e}")
+        print(f"Error deleting all sessions: {e}")
         return jsonify({'error': f'Database error: {str(e)}'}), 500
+
+# --- Delete a single session and its results ---
+@app.route('/sessions/<int:session_id>', methods=['DELETE'])
+def delete_session(session_id):
+    """Delete a single analysis session and its results"""
+    try:
+        # Enable foreign key constraints for SQLite (if applicable)
+        from flask import current_app
+        from sqlalchemy import text as sql_text
+        if current_app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
+            db.session.connection().execute(sql_text('PRAGMA foreign_keys = ON;'))
+            print('[DEBUG] PRAGMA foreign_keys enabled for SQLite')
+        session = AnalysisSession.query.get_or_404(session_id)
+        print(f"[DEBUG] Attempting to delete WellResults for session {session_id}")
+        num_deleted = WellResult.query.filter_by(session_id=session.id).delete()
+        print(f"[DEBUG] Deleted {num_deleted} WellResults for session {session_id}")
+        db.session.delete(session)
+        db.session.commit()
+        print(f"[API] Deleted session {session_id} and its well results.")
+        return jsonify({'message': f'Session {session_id} deleted successfully'})
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[ERROR] Exception deleting session {session_id}: {e}\nTraceback:\n{tb}")
+        return jsonify({'error': f'Failed to delete session: {str(e)}', 'traceback': tb}), 500
 
 @app.route('/experiments/statistics', methods=['POST'])
 def save_experiment_statistics():

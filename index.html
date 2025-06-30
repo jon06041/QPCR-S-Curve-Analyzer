@@ -4,7 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>qPCR S-Curve Analyzer - Enhanced</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <!-- Chart.js v4.x (stable) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <!-- Chart.js Annotation Plugin v4.x (compatible with Chart.js v4) -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.1.0/dist/chartjs-plugin-annotation.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <script src="/static/pathogen_library.js"></script>
     <link rel="stylesheet" href="/static/style.css?v=1735174000">
@@ -236,8 +239,9 @@
         <div class="history-section" id="historySection">
             <div class="history-header">
                 <h2>Analysis History</h2>
-                <div class="history-controls" style="margin-top: 15px;">
+                <div class="history-controls" style="margin-top: 15px; display: flex; gap: 10px;">
                     <button class="control-btn trend-btn" id="trendAnalysisBtn" onclick="viewTrendAnalysis()">View Trends</button>
+                    <button class="control-btn" id="clearAllHistoryBtn" onclick="clearAllHistory()">Clear All History</button>
                 </div>
             </div>
             
@@ -272,12 +276,63 @@
                         <!-- Sample details will be populated here -->
                     </div>
                 </div>
-            </div>
+            </div>            sudo apt-get update
+            sudo apt-get install sqlitebrowser
         </div>
     </div>
 
-    <script src="/static/pathogen_grids.js"></script>
+    
     <script src="/static/pathogen_grids_data.js"></script>
+    <script>
+    // Only one Clear All History logic should exist
+    function clearAllHistory() {
+        if (confirm('Are you sure you want to clear all analysis history? This will delete both local and server history and cannot be undone.')) {
+            try {
+                localStorage.removeItem('qpcrAnalysisHistory');
+                console.log('[ClearAllHistory] localStorage.qpcrAnalysisHistory removed.');
+                // Double-check removal
+                if (!localStorage.getItem('qpcrAnalysisHistory')) {
+                    console.log('[ClearAllHistory] Confirmed: qpcrAnalysisHistory is now null.');
+                } else {
+                    console.warn('[ClearAllHistory] qpcrAnalysisHistory still present:', localStorage.getItem('qpcrAnalysisHistory'));
+                }
+                // --- NEW: Also clear server-side history ---
+                fetch('/sessions', { method: 'DELETE' })
+                    .then(res => res.json())
+                    .then(data => {
+                        console.log('[ClearAllHistory] Server response:', data);
+                        if (typeof loadAnalysisHistory === 'function') {
+                            loadAnalysisHistory();
+                        } else if (document.getElementById('historyContent')) {
+                            document.getElementById('historyContent').innerHTML = '<p>No analysis history available.</p>';
+                        }
+                        setTimeout(function() {
+                            location.reload();
+                        }, 500);
+                    })
+                    .catch(e => {
+                        alert('Error clearing server history: ' + e.message);
+                        console.error('[ClearAllHistory] Server exception:', e);
+                        location.reload();
+                    });
+            } catch (e) {
+                alert('Error clearing history: ' + e.message);
+                console.error('[ClearAllHistory] Exception:', e);
+                location.reload();
+            }
+        }
+    }
+    // Remove any duplicate or legacy Clear History buttons on DOMContentLoaded
+    document.addEventListener('DOMContentLoaded', function() {
+        const allClearBtns = document.querySelectorAll('#clearAllHistoryBtn');
+        if (allClearBtns.length > 1) {
+            // Keep the first, remove the rest
+            for (let i = 1; i < allClearBtns.length; i++) {
+                allClearBtns[i].parentNode.removeChild(allClearBtns[i]);
+            }
+        }
+    });
+    </script>
     <script src="/static/script.js"></script>
 </body>
 </html>

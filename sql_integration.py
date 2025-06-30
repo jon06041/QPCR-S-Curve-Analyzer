@@ -12,8 +12,10 @@ from qpcr_analyzer import process_csv_data, validate_csv_structure
 def get_database_engine():
     """Get SQLite database engine"""
     # Use SQLite database file from the project
-    sqlite_path = 'qpcr_analysis.db'
-    return create_engine(f'sqlite:///{sqlite_path}')
+    sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
+    abs_path = os.path.abspath(sqlite_path)
+    print(f"[DEBUG] SQL integration DB path: {abs_path}")
+    return create_engine(f'sqlite:///{abs_path}')
 
 def process_with_sql_integration(amplification_data, samples_csv_data, fluorophore):
     """

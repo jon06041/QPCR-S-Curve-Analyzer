@@ -1597,6 +1597,33 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
         });
     }
     
+    // Prepare annotation for threshold if present
+    let annotation = undefined;
+    console.log('[Chart.js][updateChart] wellResult:', wellResult);
+    if (wellResult && wellResult.threshold_value != null && !isNaN(wellResult.threshold_value)) {
+        annotation = {
+            annotations: {
+                threshold: {
+                    type: 'line',
+                    yMin: wellResult.threshold_value,
+                    yMax: wellResult.threshold_value,
+                    borderColor: 'black',
+                    borderWidth: 2,
+                    label: {
+                        display: true,
+                        content: 'threshold',
+                        color: 'black',
+                        backgroundColor: 'white',
+                        position: 'end',
+                        font: { weight: 'bold' }
+                    }
+                }
+            }
+        };
+        console.log('[Chart.js][updateChart] threshold annotation config:', annotation);
+    } else {
+        console.log('[Chart.js][updateChart] No threshold annotation for this well. threshold_value:', wellResult ? wellResult.threshold_value : undefined);
+    }
     window.amplificationChart = new Chart(ctx, {
         type: 'scatter',
         data: { datasets: datasets },
@@ -1613,7 +1640,8 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
                 legend: {
                     display: true,
                     position: 'top'
-                }
+                },
+                ...(annotation ? { annotation } : {})
             },
             scales: {
                 x: {
@@ -2410,6 +2438,27 @@ async function loadAnalysisHistory() {
             displayAnalysisHistory(data.sessions);
             // Always validate channel completeness and update UI after loading history
             validateAndUpdateUI(data.sessions);
+            // --- Patch: If a session is loaded, ensure chart and selectors are initialized ---
+            // Find the most recent session with individual_results
+            const latestSession = data.sessions.find(s => s.individual_results && Object.keys(s.individual_results).length > 0);
+            if (latestSession) {
+                // Always wrap as { individual_results: ... }
+                window.currentAnalysisResults = { individual_results: latestSession.individual_results };
+                // Set global for legacy code
+                currentAnalysisResults = { individual_results: latestSession.individual_results };
+                // Initialize selectors and chart
+                populateWellSelector(latestSession.individual_results);
+                populateResultsTable(latestSession.individual_results);
+                // Show first well or all curves
+                const firstWell = Object.keys(latestSession.individual_results)[0];
+                if (firstWell) {
+                    showWellDetails(firstWell);
+                } else {
+                    showAllCurves('all');
+                }
+                // Always show all curves overlay after loading from history
+                showAllCurves('all');
+            }
         } else {
             // Fallback to local storage
             const localHistory = getLocalAnalysisHistory();
@@ -2927,13 +2976,11 @@ function displayPathogenChannelStatusInBreakdown(testStatus) {
     
     let statusHtml = '';
     let hasCurrentExperiment = false;
-    let hasAnyLoadedSession = false;
-    
-    // Check if we have any loaded analysis results (indicates a session is loaded)
-    if (currentAnalysisResults && currentAnalysisResults.individual_results && 
-        Object.keys(currentAnalysisResults.individual_results).length > 0) {
-        hasAnyLoadedSession = true;
-    }
+    // Robust: always derive session loaded state from data, not a local variable
+    const hasAnyLoadedSession = (
+        currentAnalysisResults && currentAnalysisResults.individual_results &&
+        Object.keys(currentAnalysisResults.individual_results).length > 0
+    );
     
     // Additional check: if we have valid test status with sessions, we're in a loaded state
     const hasValidTestStatus = Object.values(testStatus).some(test => 
@@ -4123,17 +4170,37 @@ function loadLocalSessionDetails(sessionIndex) {
             console.error('Session not found in local history');
             return;
         }
-        
         const session = history[sessionIndex];
         analysisResults = session.results;
-        
+        // Patch: set currentAnalysisResults and window.currentAnalysisResults for full compatibility
+        window.currentAnalysisResults = session.results;
+        currentAnalysisResults = session.results;
+        // Patch: set hasAnyLoadedSession = true and force UI to loaded state
+        if (typeof window.hasAnyLoadedSession !== 'undefined') {
+            window.hasAnyLoadedSession = true;
+        }
+        try {
+            hasAnyLoadedSession = true;
+        } catch (e) {}
+        // Show analysis section, hide upload/history
+        const analysisSection = document.getElementById('analysisSection');
+        if (analysisSection) analysisSection.style.display = '';
+        const historySection = document.getElementById('historySection');
+        if (historySection) historySection.style.display = 'none';
+        const uploadSection = document.getElementById('uploadSection');
+        if (uploadSection) uploadSection.style.display = 'none';
+        // Patch: clear any history placeholder/empty state
+        const historyContent = document.getElementById('historyContent');
+        if (historyContent) historyContent.innerHTML = '';
+        // Patch: always re-render chart and results table after loading from history
+        if (typeof showAllCurves === 'function') showAllCurves('all');
+        if (typeof populateResultsTable === 'function' && currentAnalysisResults && currentAnalysisResults.individual_results) {
+            populateResultsTable(currentAnalysisResults.individual_results);
+        }
         displayAnalysisResults(session.results);
-        
         // Scroll to analysis section
         document.getElementById('analysisSection').scrollIntoView({ behavior: 'smooth' });
-        
         console.log('Loaded local session:', session.filename);
-        
     } catch (error) {
         console.error('Error loading local session details:', error);
         alert('Error loading analysis history: ' + error.message);
@@ -7044,6 +7111,49 @@ function showAllCurves(selectedFluorophore) {
     // }
     
     // Create chart with all curves
+    // Collect all unique threshold values for displayed wells
+    // Only show one threshold per channel (fluorophore) in multi-curve view
+    const fluorThresholds = {};
+    Object.keys(results).forEach((wellKey) => {
+        const wellData = results[wellKey];
+        if (selectedFluorophore !== 'all' && wellData.fluorophore !== selectedFluorophore) return;
+        if (wellData.threshold_value != null && !isNaN(wellData.threshold_value)) {
+            const fluor = wellData.fluorophore || 'Unknown';
+            // Only set the first threshold found for each fluorophore
+            if (!(fluor in fluorThresholds)) {
+                fluorThresholds[fluor] = Number(wellData.threshold_value);
+            }
+        }
+    });
+    let annotation = undefined;
+    if (Object.keys(fluorThresholds).length > 0) {
+        let annos = {};
+        let idx = 1;
+        Object.entries(fluorThresholds).forEach(([fluor, val]) => {
+            let labelText = `threshold (${fluor})`;
+            annos[`threshold${idx}`] = {
+                type: 'line',
+                yMin: val,
+                yMax: val,
+                borderColor: 'black',
+                borderWidth: 2,
+                label: {
+                    display: true,
+                    content: labelText,
+                    color: 'black',
+                    backgroundColor: 'white',
+                    position: 'end',
+                    font: { weight: 'bold' }
+                }
+            };
+            idx++;
+        });
+        annotation = { annotations: annos };
+        console.log('[Chart.js][showAllCurves] fluorThresholds:', fluorThresholds);
+        console.log('[Chart.js][showAllCurves] annotation config:', annotation);
+    } else {
+        console.log('[Chart.js][showAllCurves] No threshold annotations. fluorThresholds:', fluorThresholds);
+    }
     window.amplificationChart = new Chart(ctx, {
         type: 'line',
         data: { datasets },
@@ -7061,7 +7171,8 @@ function showAllCurves(selectedFluorophore) {
                 },
                 tooltip: {
                     enabled: false // Disable tooltips for better performance with many curves
-                }
+                },
+                ...(annotation ? { annotation } : {})
             },
             scales: {
                 x: {
@@ -7162,6 +7273,48 @@ function showGoodCurves(selectedFluorophore) {
     }
     
     // Create chart with good curves only
+    // Collect all threshold values per fluorophore, then use median per channel
+    const channelThresholds = {};
+    Object.keys(results).forEach((wellKey) => {
+        const wellData = results[wellKey];
+        const amplitude = wellData.amplitude || 0;
+        if (amplitude <= 500) return;
+        if (selectedFluorophore !== 'all' && wellData.fluorophore !== selectedFluorophore) return;
+        if (wellData.threshold_value != null && !isNaN(wellData.threshold_value) && wellData.fluorophore) {
+            const fluor = wellData.fluorophore;
+            if (!channelThresholds[fluor]) channelThresholds[fluor] = [];
+            channelThresholds[fluor].push(Number(wellData.threshold_value));
+        }
+    });
+    let annotation = undefined;
+    if (Object.keys(channelThresholds).length > 0) {
+        let annos = {};
+        let idx = 1;
+        Object.entries(channelThresholds).forEach(([fluor, thresholds]) => {
+            if (thresholds.length > 0) {
+                const sorted = thresholds.slice().sort((a, b) => a - b);
+                const median = sorted[Math.floor(sorted.length / 2)];
+                let labelText = `threshold (${fluor})`;
+                annos[`threshold${idx}`] = {
+                    type: 'line',
+                    yMin: median,
+                    yMax: median,
+                    borderColor: getFluorophoreColor(fluor),
+                    borderWidth: 2,
+                    label: {
+                        display: true,
+                        content: labelText,
+                        color: getFluorophoreColor(fluor),
+                        backgroundColor: 'white',
+                        position: 'end',
+                        font: { weight: 'bold' }
+                    }
+                };
+                idx++;
+            }
+        });
+        annotation = { annotations: annos };
+    }
     window.amplificationChart = new Chart(ctx, {
         type: 'line',
         data: { datasets },
@@ -7179,7 +7332,8 @@ function showGoodCurves(selectedFluorophore) {
                 },
                 tooltip: {
                     enabled: datasets.length <= 20 // Disable tooltips for better performance with many curves
-                }
+                },
+                ...(annotation ? { annotation } : {})
             },
             scales: {
                 x: {
@@ -7357,6 +7511,61 @@ function showResultsFiltered(selectedFluorophore, resultType) {
     }
     
     // Create chart with filtered results
+    // Collect all threshold values per fluorophore, then use median per channel
+    const channelThresholds = {};
+    Object.keys(results).forEach((wellKey) => {
+        const wellData = results[wellKey];
+        const amplitude = wellData.amplitude || 0;
+        let shouldInclude = false;
+        const isGoodSCurve = wellData.is_good_scurve || false;
+        switch (resultType) {
+            case 'pos':
+                shouldInclude = isGoodSCurve && amplitude > 500;
+                break;
+            case 'neg':
+                shouldInclude = amplitude < 400;
+                break;
+            case 'redo':
+                shouldInclude = amplitude >= 400 && amplitude <= 500;
+                break;
+        }
+        if (!shouldInclude) return;
+        if (selectedFluorophore !== 'all' && wellData.fluorophore !== selectedFluorophore) return;
+        if (wellData.threshold_value != null && !isNaN(wellData.threshold_value) && wellData.fluorophore) {
+            const fluor = wellData.fluorophore;
+            if (!channelThresholds[fluor]) channelThresholds[fluor] = [];
+            channelThresholds[fluor].push(Number(wellData.threshold_value));
+        }
+    });
+    let annotation = undefined;
+    if (Object.keys(channelThresholds).length > 0) {
+        let annos = {};
+        let idx = 1;
+        Object.entries(channelThresholds).forEach(([fluor, thresholds]) => {
+            if (thresholds.length > 0) {
+                const sorted = thresholds.slice().sort((a, b) => a - b);
+                const median = sorted[Math.floor(sorted.length / 2)];
+                let labelText = `threshold (${fluor})`;
+                annos[`threshold${idx}`] = {
+                    type: 'line',
+                    yMin: median,
+                    yMax: median,
+                    borderColor: getFluorophoreColor(fluor),
+                    borderWidth: 2,
+                    label: {
+                        display: true,
+                        content: labelText,
+                        color: getFluorophoreColor(fluor),
+                        backgroundColor: 'white',
+                        position: 'end',
+                        font: { weight: 'bold' }
+                    }
+                };
+                idx++;
+            }
+        });
+        annotation = { annotations: annos };
+    }
     window.amplificationChart = new Chart(ctx, {
         type: 'line',
         data: { datasets },
@@ -7374,7 +7583,8 @@ function showResultsFiltered(selectedFluorophore, resultType) {
                 },
                 tooltip: {
                     enabled: datasets.length <= 20 // Disable tooltips for better performance with many curves
-                }
+                },
+                ...(annotation ? { annotation } : {})
             },
             scales: {
                 x: {
@@ -7735,6 +7945,29 @@ function createModalChart(wellKey, wellData) {
         });
     }
     
+    // Prepare annotation for threshold if present
+    let annotation = undefined;
+    if (wellData && wellData.threshold_value != null && !isNaN(wellData.threshold_value)) {
+        annotation = {
+            annotations: {
+                threshold: {
+                    type: 'line',
+                    yMin: wellData.threshold_value,
+                    yMax: wellData.threshold_value,
+                    borderColor: 'black',
+                    borderWidth: 2,
+                    label: {
+                        display: true,
+                        content: 'threshold',
+                        color: 'black',
+                        backgroundColor: 'white',
+                        position: 'end',
+                        font: { weight: 'bold' }
+                    }
+                }
+            }
+        };
+    }
     modalChart = new Chart(ctx, {
         type: 'scatter',
         data: { datasets: datasets },
@@ -7747,13 +7980,11 @@ function createModalChart(wellKey, wellData) {
                 //     text: `qPCR Amplification Curve - ${wellId} (${fluorophore})`,
                 //     font: { size: 16, weight: 'bold' }
                 // },
-                
-                
-                
                 legend: {
                     display: true,
                     position: 'top'
-                }
+                },
+                ...(annotation ? { annotation } : {})
             },
             scales: {
                 x: {
@@ -8301,41 +8532,44 @@ async function deleteSessionGroup(sessionId, event) {
     if (event) {
         event.stopPropagation();
     }
-    
     // Find the session to determine if it's combined or individual
     let session = window.currentCombinedSessions?.find(s => s.id === sessionId);
-    
     // If not found in combined sessions, it might be an individual session ID (numeric)
     if (!session && !isNaN(sessionId)) {
         // Handle direct database session ID
         if (!confirm('Are you sure you want to delete this analysis session?')) {
             return;
         }
-        
+        const deleteBtn = event && event.target ? event.target : null;
+        if (deleteBtn) deleteBtn.disabled = true;
         try {
             const response = await fetch(`/sessions/${sessionId}`, {
                 method: 'DELETE'
             });
-            
             if (response.ok) {
                 loadAnalysisHistory();
             } else {
-                const errorData = await response.json();
-                alert('Failed to delete session: ' + (errorData.error || 'Unknown error'));
+                let errorText = '';
+                try {
+                    const errorData = await response.json();
+                    errorText = errorData.error || 'Unknown error';
+                } catch (e) {
+                    errorText = 'Unknown error';
+                }
+                alert('Failed to delete session: ' + errorText);
             }
-            return;
         } catch (error) {
             console.error('Error deleting session:', error);
             alert('Failed to delete session: ' + error.message);
-            return;
+        } finally {
+            if (deleteBtn) deleteBtn.disabled = false;
         }
+        return;
     }
-    
     if (!session) {
         alert('Session not found. Please refresh and try again.');
         return;
     }
-    
     let confirmMessage;
     if (session.is_combined) {
         confirmMessage = `Are you sure you want to delete this multi-fluorophore analysis? This will delete ${session.session_ids.length} individual sessions.`;
@@ -8696,10 +8930,10 @@ function getControlValidationForPathogen(pathogenName, controlType, setNumber) {
     // Handle both fresh analysis (individual_results object) and loaded sessions (array structure)
     let individualResults;
     if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
-        // Fresh analysis results
+        // Fresh analysis results (object with .individual_results)
         individualResults = window.currentAnalysisResults.individual_results;
     } else if (Array.isArray(window.currentAnalysisResults)) {
-        // Loaded session - convert array to object format
+        // Legacy: array of wells (should not occur, but fallback)
         individualResults = {};
         window.currentAnalysisResults.forEach(result => {
             if (result.well_id) {
@@ -8707,7 +8941,8 @@ function getControlValidationForPathogen(pathogenName, controlType, setNumber) {
             }
         });
     } else if (window.currentAnalysisResults && typeof window.currentAnalysisResults === 'object') {
-        // Already in correct format
+        // Fresh upload: object keyed by well_id (no .individual_results)
+        // This is the case for fresh uploads, so treat as well dict
         individualResults = window.currentAnalysisResults;
     } else {
         console.log('🔍 PATHOGEN GRID - Invalid currentAnalysisResults format');
@@ -8768,9 +9003,16 @@ function getControlValidationForPathogen(pathogenName, controlType, setNumber) {
             details
         };
     }
-    
+    // Robustly convert currentAnalysisResults to array for searching
+    const wellsArray = Array.isArray(window.currentAnalysisResults)
+        ? window.currentAnalysisResults
+        : window.currentAnalysisResults && typeof window.currentAnalysisResults === 'object'
+            ? (window.currentAnalysisResults.individual_results
+                ? Object.values(window.currentAnalysisResults.individual_results)
+                : Object.values(window.currentAnalysisResults))
+            : [];
     // Check if we have a well at this coordinate with this fluorophore
-    const wellData = window.currentAnalysisResults.find(well => 
+    const wellData = wellsArray.find(well => 
         well.well_id === wellKey || 
         (well.well_id && well.well_id.startsWith(expectedCoordinate) && well.well_id.includes(targetFluorophore))
     );
@@ -8855,15 +9097,19 @@ function createPathogenControlGrids(controlSets, testName) {
     console.log('🔍 PATHOGEN GRIDS - Using real control extraction for test:', testName);
     
     // Get current analysis results
-    if (!window.currentAnalysisResults || window.currentAnalysisResults.length === 0) {
+    const wellsArray = Array.isArray(window.currentAnalysisResults)
+        ? window.currentAnalysisResults
+        : window.currentAnalysisResults && typeof window.currentAnalysisResults === 'object'
+            ? (window.currentAnalysisResults.individual_results
+                ? Object.values(window.currentAnalysisResults.individual_results)
+                : Object.values(window.currentAnalysisResults))
+            : [];
+    if (!wellsArray || wellsArray.length === 0) {
         console.log('🔍 PATHOGEN GRIDS - No current analysis results available');
         return;
     }
-    
     // Extract real control coordinates using same logic as Controls filter
-    const wellResultsArray = Array.isArray(window.currentAnalysisResults) 
-        ? window.currentAnalysisResults 
-        : Object.values(window.currentAnalysisResults);
+    const wellResultsArray = wellsArray;
     
     const { controlsByType, controlsByChannel } = extractRealControlCoordinates(wellResultsArray, testName);
     

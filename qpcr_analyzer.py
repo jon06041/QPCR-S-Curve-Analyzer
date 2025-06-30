@@ -154,10 +154,11 @@ def analyze_curve_quality(cycles, rfu, plot=False,
                 'is_good_scurve': False
             }
 
-        # Calculate dynamic threshold
+        # Calculate exponential phase threshold (inflection point of sigmoid)
         baseline = np.mean(rfu[:5])
         baseline_std = np.std(rfu[:5])
-        threshold_value = baseline + threshold_factor * baseline_std
+        # threshold_value will be set after sigmoid fit (see below)
+        threshold_value = None  # placeholder
 
         # Dynamic initial parameter guesses based on data characteristics
         rfu_range = np.max(rfu) - np.min(rfu)
@@ -197,6 +198,14 @@ def analyze_curve_quality(cycles, rfu, plot=False,
 
         # Extract parameters
         L, k, x0, B = popt
+
+        # --- Exponential phase targeting for threshold ---
+        # Inflection point (steepest slope) for sigmoid: RFU = L/2 + B
+        exp_phase_threshold = L / 2 + B
+        # Ensure threshold is within 10-90% of max RFU (exponential phase window)
+        min_thresh = B + 0.10 * (L)
+        max_thresh = B + 0.90 * (L)
+        threshold_value = min(max(exp_phase_threshold, min_thresh), max_thresh)
 
         # Calculate additional steepness focusing on post-cycle 8 exponential phase
         post_cycle8_mask = cycles >= 8
