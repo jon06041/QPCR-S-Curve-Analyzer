@@ -366,12 +366,18 @@ def static_files(filename):
 def analyze_data():
     """Endpoint to analyze qPCR data and save results to database"""
     try:
+        print(f"[ANALYZE] Starting analysis request")
+        
         # Get JSON data from request
         request_data = request.get_json()
         filename = request.headers.get('X-Filename', 'unknown.csv')
         fluorophore = request.headers.get('X-Fluorophore', 'Unknown')
         
+        print(f"[ANALYZE] Request headers - Filename: {filename}, Fluorophore: {fluorophore}")
+        print(f"[ANALYZE] Request data type: {type(request_data)}, Length: {len(request_data) if request_data else 0}")
+        
         if not request_data:
+            print(f"[ANALYZE ERROR] No data provided")
             return jsonify({'error': 'No data provided', 'success': False}), 400
         
         # Extract analysis data and samples data from payload
@@ -379,15 +385,19 @@ def analyze_data():
             # New format with SQL integration support
             data = request_data['analysis_data']
             samples_data = request_data.get('samples_data')
+            print(f"[ANALYZE] Using new format - analysis_data length: {len(data)}")
         else:
             # Legacy format for backward compatibility
             data = request_data
             samples_data = None
+            print(f"[ANALYZE] Using legacy format - data length: {len(data)}")
         
+        print(f"[ANALYZE] Starting validation...")
         # Validate data structure
         errors, warnings = validate_csv_structure(data)
         
         if errors:
+            print(f"[ANALYZE ERROR] Validation failed: {errors}")
             return jsonify({
                 'error': 'Data validation failed',
                 'validation_errors': errors,
@@ -395,6 +405,7 @@ def analyze_data():
                 'success': False
             }), 400
         
+        print(f"[ANALYZE] Validation passed, starting processing...")
         # Process the data with SQL integration if samples data available
         try:
             if samples_data:
@@ -414,8 +425,12 @@ def analyze_data():
             if not results.get('success', False):
                 print(f"Analysis failed: {results.get('error', 'Unknown error')}")
                 return jsonify(results), 500
+                
+            print(f"[ANALYZE] Analysis completed successfully")
         except Exception as analysis_error:
             print(f"Analysis processing error: {analysis_error}")
+            import traceback
+            traceback.print_exc()
             return jsonify({
                 'error': f'Analysis failed: {str(analysis_error)}',
                 'success': False
@@ -441,6 +456,8 @@ def analyze_data():
         fluorophore = request.headers.get('X-Fluorophore', 'Unknown')
         is_individual_channel = fluorophore in ['Cy5', 'FAM', 'HEX', 'Texas Red']
         
+        print(f"[ANALYZE] Database save - fluorophore: {fluorophore}, is_individual: {is_individual_channel}")
+        
         if is_individual_channel:
             # Save individual channel session with complete filename
             try:
@@ -448,6 +465,8 @@ def analyze_data():
                 print(f"Individual {fluorophore} channel saved to database: {database_saved}")
             except Exception as save_error:
                 print(f"Failed to save individual {fluorophore} channel: {save_error}")
+                import traceback
+                traceback.print_exc()
                 database_saved = False
         else:
             # For multi-fluorophore analysis, save combined session after all individual channels
@@ -458,19 +477,26 @@ def analyze_data():
         if warnings:
             results['validation_warnings'] = warnings
         
+        print(f"[ANALYZE] Preparing JSON response...")
         # Ensure all numpy data types are converted to Python types for JSON serialization
         try:
             import json
             json_str = json.dumps(results, default=str)  # Convert numpy types to strings
+            print(f"[ANALYZE] JSON serialization successful, response length: {len(json_str)}")
             return json_str, 200, {'Content-Type': 'application/json'}
         except Exception as json_error:
             print(f"JSON serialization error: {json_error}")
+            import traceback
+            traceback.print_exc()
             return jsonify({
                 'error': f'Response serialization failed: {str(json_error)}',
                 'success': False
             }), 500
         
     except Exception as e:
+        print(f"[ANALYZE ERROR] Server error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
             'error': f'Server error: {str(e)}',
             'success': False

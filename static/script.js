@@ -623,6 +623,10 @@ async function performAnalysis() {
             const singleResult = allResults[fluorophores[0]];
             analysisResults = singleResult;
             
+            // Set global variables for control grid access during fresh analysis
+            currentAnalysisResults = singleResult;
+            window.currentAnalysisResults = singleResult;
+            
             const filename = amplificationFiles[fluorophores[0]].fileName;
             
             // Save single fluorophore session to database with proper well counts
@@ -637,6 +641,10 @@ async function performAnalysis() {
             // Combine all fluorophore results for multi-fluorophore display (SQL-integrated)
             const combinedResults = combineMultiFluorophoreResultsSQL(allResults);
             analysisResults = combinedResults;
+            
+            // Set global variables for control grid access during fresh analysis
+            currentAnalysisResults = combinedResults;
+            window.currentAnalysisResults = combinedResults;
             
             // Use the base pattern from the first file for consistent naming
             const firstFileName = Object.values(amplificationFiles)[0].fileName;
@@ -874,7 +882,7 @@ async function displayMultiFluorophoreResults(results) {
         if (window.showPathogenGridsWithData && typeof window.showPathogenGridsWithData === 'function') {
             console.log('🔍 MULTI-FLUOROPHORE - Using real pathogen grids system');
             setTimeout(() => {
-                window.showPathogenGridsWithData(testCode, []);
+                window.showPathogenGridsWithData(testCode, controlIssues);
             }, 100);
         } else {
             console.log('🔍 MULTI-FLUOROPHORE - Fallback to universal control grid');
