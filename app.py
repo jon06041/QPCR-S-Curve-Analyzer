@@ -8,6 +8,103 @@ from models import db, AnalysisSession, WellResult, ExperimentStatistics
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.exc import OperationalError, IntegrityError, DatabaseError
 
+def get_pathogen_mapping():
+    """Centralized pathogen mapping that matches pathogen_library.js"""
+    return {
+        "Lacto": {
+            "Cy5": "Lactobacillus jenseni",
+            "FAM": "Lactobacillus gasseri", 
+            "HEX": "Lactobacillus iners",
+            "Texas Red": "Lactobacillus crispatus"
+        },
+        "Calb": {
+            "HEX": "Candida albicans"
+        },
+        "Ctrach": {
+            "FAM": "Chlamydia trachomatis"
+        },
+        "Ngon": {
+            "HEX": "Neisseria gonhorrea"
+        },
+        "Tvag": {
+            "FAM": "Trichomonas vaginalis"
+        },
+        "Cglab": {
+            "FAM": "Candida glabrata"
+        },
+        "Cpara": {
+            "FAM": "Candida parapsilosis"
+        },
+        "Ctrop": {
+            "FAM": "Candida tropicalis"
+        },
+        "Gvag": {
+            "FAM": "Gardnerella vaginalis"
+        },
+        "BVAB2": {
+            "FAM": "BVAB2"
+        },
+        "CHVIC": {
+            "FAM": "CHVIC"
+        },
+        "AtopVag": {
+            "FAM": "Atopobium vaginae"
+        },
+        "Megasphaera": {
+            "FAM": "Megasphaera1",
+            "HEX": "Megasphaera2"
+        },
+        "BVPanelPCR1": {
+            "FAM": "Bacteroides fragilis",
+            "HEX": "Mobiluncus curtisii",
+            "Texas Red": "Streptococcus anginosus",
+            "Cy5": "Sneathia sanguinegens"
+        },
+        "BVPanelPCR2": {
+            "FAM": "Atopobium vaginae",
+            "HEX": "Mobiluncus mulieris",
+            "Texas Red": "Megasphaera type 2",
+            "Cy5": "Megasphaera type 1"
+        },
+        "BVPanelPCR3": {
+            "FAM": "Gardnerella vaginalis",
+            "HEX": "Lactobacillus acidophilus",
+            "Texas Red": "Prevotella bivia",
+            "Cy5": "Bifidobacterium breve"
+        },
+        "BVPanelPCR4": {
+            "FAM": "Gardnerella vaginalis",
+            "HEX": "Lactobacillus acidophilus",
+            "Texas Red": "Prevotella bivia",
+            "Cy5": "Bifidobacterium breve"
+        },
+        "BVAB": {
+            "FAM": "BVAB2",
+            "HEX": "BVAB1", 
+            "Cy5": "BVAB3"
+        },
+        "Mgen": {
+            "FAM": "Mycoplasma genitalium"
+        },
+        "Upar": {
+            "FAM": "Ureaplasma parvum"
+        },
+        "Uure": {
+            "FAM": "Ureaplasma urealyticum"
+        }
+        # Add more mappings as needed from pathogen_library.js
+    }
+
+def get_pathogen_target(test_code, fluorophore):
+    """Get pathogen target for a given test code and fluorophore"""
+    pathogen_mapping = get_pathogen_mapping()
+    
+    if test_code in pathogen_mapping:
+        return pathogen_mapping[test_code].get(fluorophore, fluorophore)
+    
+    # Fallback to fluorophore name if no mapping found
+    return fluorophore
+
 def extract_base_pattern(filename):
     """Extract base pattern from CFX Manager filename, handling trailing dashes"""
     # Match pattern: prefix_numbers_CFXnumbers (allowing additional suffixes)
@@ -121,30 +218,10 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             if test_code.startswith('Ac'):
                 test_code = test_code[2:]  # Remove "Ac" prefix
             
-            # Enhanced pathogen mapping for all test types
-            pathogen_target = fluorophore  # Default fallback
+            print(f"DEBUG: Test code extraction - filename: {filename}, base_pattern: {base_pattern}, test_code: {test_code}")
             
-            if test_code == 'BVAB':
-                pathogen_mapping = {
-                    'FAM': 'BVAB2',
-                    'HEX': 'BVAB1', 
-                    'Cy5': 'BVAB3'
-                }
-                pathogen_target = pathogen_mapping.get(fluorophore, fluorophore)
-            elif test_code == 'Ngon' and fluorophore == 'HEX':
-                pathogen_target = 'Neisseria gonhorrea'
-            elif test_code == 'Calb' and fluorophore == 'HEX':
-                pathogen_target = 'Candida albicans'
-            elif test_code == 'Ctrach' and fluorophore == 'FAM':
-                pathogen_target = 'Chlamydia trachomatis'
-            elif test_code == 'Tvag' and fluorophore == 'FAM':
-                pathogen_target = 'Trichomonas vaginalis'
-            elif test_code == 'Mgen' and fluorophore == 'FAM':
-                pathogen_target = 'Mycoplasma genitalium'
-            elif test_code == 'Upar' and fluorophore == 'FAM':
-                pathogen_target = 'Ureaplasma parvum'
-            elif test_code == 'Uure' and fluorophore == 'FAM':
-                pathogen_target = 'Ureaplasma urealyticum'
+            # Use centralized pathogen mapping
+            pathogen_target = get_pathogen_target(test_code, fluorophore)
             
             print(f"Backend pathogen mapping: {test_code} + {fluorophore} -> {pathogen_target}")
             
@@ -481,9 +558,34 @@ def analyze_data():
         # Ensure all numpy data types are converted to Python types for JSON serialization
         try:
             import json
-            json_str = json.dumps(results, default=str)  # Convert numpy types to strings
-            print(f"[ANALYZE] JSON serialization successful, response length: {len(json_str)}")
-            return json_str, 200, {'Content-Type': 'application/json'}
+            import numpy as np
+            
+            def convert_numpy_types(obj):
+                """Recursively convert numpy types to Python types"""
+                if isinstance(obj, dict):
+                    return {key: convert_numpy_types(value) for key, value in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert_numpy_types(item) for item in obj]
+                elif isinstance(obj, np.integer):
+                    return int(obj)
+                elif isinstance(obj, np.floating):
+                    return float(obj)
+                elif isinstance(obj, np.bool_):
+                    return bool(obj)
+                elif isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                else:
+                    return obj
+            
+            # Convert all numpy types to Python types
+            converted_results = convert_numpy_types(results)
+            
+            # Test JSON serialization to catch any remaining issues
+            json_str = json.dumps(converted_results)
+            print(f"[ANALYZE] JSON serialization test successful, response length: {len(json_str)}")
+            
+            # Return properly formatted JSON response
+            return jsonify(converted_results)
         except Exception as json_error:
             print(f"JSON serialization error: {json_error}")
             import traceback
@@ -620,6 +722,15 @@ def save_combined_session():
         positive_wells = sum(breakdown['positive'] for breakdown in fluorophore_breakdown.values())
         success_rate = (positive_wells / total_wells * 100) if total_wells > 0 else 0
         
+        # Extract test code for proper pathogen mapping
+        experiment_name = data.get('filename', 'Multi-Fluorophore Analysis')
+        base_pattern = experiment_name.replace('Multi-Fluorophore_', '')
+        test_code = base_pattern.split('_')[0]
+        if test_code.startswith('Ac'):
+            test_code = test_code[2:]  # Remove "Ac" prefix
+        
+        print(f"DEBUG: Combined session test code extraction - experiment_name: {experiment_name}, base_pattern: {base_pattern}, test_code: {test_code}")
+        
         # Create pathogen breakdown string for multi-fluorophore display
         pathogen_breakdown_display = ""
         if len(fluorophore_breakdown) > 1:  # Multi-fluorophore session
@@ -634,14 +745,8 @@ def save_combined_session():
                 breakdown = fluorophore_breakdown[fluorophore]
                 rate = (breakdown['positive'] / breakdown['total'] * 100) if breakdown['total'] > 0 else 0
                 
-                # Map fluorophore to pathogen target
-                pathogen_target = fluorophore
-                if fluorophore == 'Cy5':
-                    pathogen_target = 'BVAB3'
-                elif fluorophore == 'FAM':
-                    pathogen_target = 'BVAB2'
-                elif fluorophore == 'HEX':
-                    pathogen_target = 'BVAB1'
+                # Use centralized pathogen mapping
+                pathogen_target = get_pathogen_target(test_code, fluorophore)
                 
                 pathogen_rates.append(f"{pathogen_target}: {rate:.1f}%")
             
@@ -651,13 +756,10 @@ def save_combined_session():
             # Single fluorophore session
             for fluorophore, breakdown in fluorophore_breakdown.items():
                 rate = (breakdown['positive'] / breakdown['total'] * 100) if breakdown['total'] > 0 else 0
-                pathogen_target = fluorophore
-                if fluorophore == 'Cy5':
-                    pathogen_target = 'BVAB3'
-                elif fluorophore == 'FAM':
-                    pathogen_target = 'BVAB2'
-                elif fluorophore == 'HEX':
-                    pathogen_target = 'BVAB1'
+                
+                # Use centralized pathogen mapping
+                pathogen_target = get_pathogen_target(test_code, fluorophore)
+                
                 pathogen_breakdown_display = f"{pathogen_target}: {rate:.1f}%"
         
         # Extract cycle information from first available well

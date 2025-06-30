@@ -1,5 +1,46 @@
 
 
+// Enhanced error handling for inconsistent 400 errors
+async function fetchWithRetry(url, options, maxRetries = 2) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            console.log(`🔍 RETRY-DEBUG - Attempt ${attempt}/${maxRetries} for ${options.headers['X-Fluorophore']}`);
+            const response = await fetch(url, options);
+            
+            if (response.ok) {
+                return response;
+            }
+            
+            if (response.status === 400) {
+                const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+                console.error(`🔍 400-ERROR-DEBUG - Attempt ${attempt} failed for ${options.headers['X-Fluorophore']}:`, {
+                    status: response.status,
+                    error: errorData,
+                    requestSize: options.body?.length || 0,
+                    headers: options.headers
+                });
+                
+                if (attempt < maxRetries) {
+                    // Wait before retry with exponential backoff
+                    const delay = 1000 * Math.pow(2, attempt - 1);
+                    console.log(`🔍 RETRY-DEBUG - Waiting ${delay}ms before retry...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+            }
+            
+            throw new Error(`Server error: ${response.status}`);
+        } catch (error) {
+            console.error(`🔍 NETWORK-ERROR-DEBUG - Attempt ${attempt} network error:`, error);
+            if (attempt === maxRetries) {
+                throw error;
+            }
+            // Wait before retry
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+    }
+}
+
 // --- Enhanced Chart.js annotation plugin registration ---
 function registerChartAnnotationPlugin() {
     if (!window.Chart || !window.Chart.register) {
@@ -578,6 +619,13 @@ async function performAnalysis() {
                     console.warn(`🔍 DATA-PREP - No valid well data found for ${fluorophore}, SKIPPING`);
                     continue;
                 }
+                
+                // Additional validation: Check for corrupt or incomplete data
+                const dataQuality = validateAnalysisDataQuality(analysisData, fluorophore);
+                if (!dataQuality.isValid) {
+                    console.error(`🔍 DATA-QUALITY - Invalid data for ${fluorophore}:`, dataQuality.issues);
+                    continue;
+                }
             
             console.log('Sending analysis data for', fluorophore, ':', analysisData);
             
@@ -604,11 +652,21 @@ async function performAnalysis() {
                 }
             }
             
-            // Send to backend for analysis
+            // Send to backend for analysis with retry mechanism
             let response;
             try {
                 console.log(`🔍 NETWORK-DEBUG - Starting fetch for ${fluorophore}...`);
-                response = await fetch('/analyze', {
+                
+                // Validate request payload before sending
+                console.log(`🔍 PAYLOAD-DEBUG - Request payload for ${fluorophore}:`, {
+                    hasAnalysisData: !!requestPayload.analysis_data,
+                    analysisDataKeys: Object.keys(requestPayload.analysis_data || {}),
+                    analysisDataSize: JSON.stringify(requestPayload.analysis_data || {}).length,
+                    hasSamplesData: !!requestPayload.samples_data,
+                    samplesDataSize: requestPayload.samples_data?.length || 0
+                });
+                
+                response = await fetchWithRetry('/analyze', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -619,7 +677,7 @@ async function performAnalysis() {
                 });
                 console.log(`🔍 NETWORK-DEBUG - Fetch completed for ${fluorophore}, status: ${response.status}`);
             } catch (networkError) {
-                console.error(`🔍 NETWORK-ERROR - Fetch failed for ${fluorophore}:`, networkError);
+                console.error(`🔍 NETWORK-ERROR - Fetch failed for ${fluorophore} after retries:`, networkError);
                 throw new Error(`Network error for ${fluorophore}: ${networkError.message}`);
             }
 
