@@ -754,14 +754,19 @@ async function displayAnalysisResults(results) {
     const controlIssues = validateControls(individualResults);
     displayControlValidationAlerts(controlIssues);
     
-    // Display pathogen control grids for visual validation
+    // Display pathogen control grids for visual validation - ONLY for fresh uploads
+    // Skip control grid creation if this is a history load (detected by currentSessionFilename)
+    const isHistoryLoad = window.currentSessionFilename && window.currentSessionFilename !== experimentPattern;
     const testCode = extractTestCodeFromExperimentPattern(experimentPattern);
-    console.log('🔍 FRESH UPLOAD - Creating control grid for testCode:', testCode);
-    console.log('🔍 FRESH UPLOAD - Experiment pattern:', experimentPattern);
-    console.log('🔍 FRESH UPLOAD - Current analysis results available:', !!currentAnalysisResults);
-    console.log('🔍 FRESH UPLOAD - Individual results count:', Object.keys(individualResults).length);
     
-    if (testCode) {
+    console.log('🔍 FRESH UPLOAD - Control grid check:', {
+        testCode: testCode,
+        experimentPattern: experimentPattern,
+        currentSessionFilename: window.currentSessionFilename,
+        isHistoryLoad: isHistoryLoad
+    });
+    
+    if (testCode && !isHistoryLoad) {
         // Clear any existing control grids first to prevent duplicates
         const pathogenGridsContainer = document.getElementById('pathogenControlGrids');
         if (pathogenGridsContainer) {
@@ -772,7 +777,6 @@ async function displayAnalysisResults(results) {
         // Use real pathogen grid system for fresh uploads (same as used to work)
         if (window.showPathogenGridsWithData && typeof window.showPathogenGridsWithData === 'function') {
             console.log('🔍 FRESH UPLOAD - Using real pathogen grids system');
-            console.log('🔍 FRESH UPLOAD - Forcing grid display in 100ms...');
             setTimeout(() => {
                 console.log('🔍 FRESH UPLOAD - Calling showPathogenGridsWithData now');
                 window.showPathogenGridsWithData(testCode, controlIssues || []);
@@ -783,10 +787,10 @@ async function displayAnalysisResults(results) {
                 createUniversalControlGrid(testCode, individualResults);
             }, 100);
         }
+    } else if (isHistoryLoad) {
+        console.log('🔍 FRESH UPLOAD - Skipping control grid creation for history load');
     } else {
         console.log('🔍 FRESH UPLOAD - Could not extract test code from pattern:', experimentPattern);
-        console.log('🔍 FRESH UPLOAD - Available amplification files:', Object.keys(amplificationFiles || {}));
-        console.log('🔍 FRESH UPLOAD - First file name:', Object.values(amplificationFiles || {})[0]?.fileName);
     }
     
     populateWellSelector(individualResults);
@@ -886,14 +890,18 @@ async function displayMultiFluorophoreResults(results) {
     populateWellSelector(results.individual_results);
     populateResultsTable(results.individual_results);
     
-    // Create control grids for fresh multi-fluorophore analysis
-    console.log('🔍 MULTI-FLUOROPHORE - Creating control grids for fresh analysis');
+    // Create control grids for multi-fluorophore analysis - Only for fresh uploads, not history loads
+    const isHistoryLoad = window.currentSessionFilename && window.currentSessionFilename !== experimentPattern;
     const testCode = extractTestCodeFromExperimentPattern(experimentPattern);
-    console.log('🔍 MULTI-FLUOROPHORE - Experiment pattern:', experimentPattern);
-    console.log('🔍 MULTI-FLUOROPHORE - Current analysis results available:', !!currentAnalysisResults);
-    console.log('🔍 MULTI-FLUOROPHORE - Individual results count:', Object.keys(results.individual_results).length);
     
-    if (testCode) {
+    console.log('🔍 MULTI-FLUOROPHORE - Control grid check:', {
+        testCode: testCode,
+        experimentPattern: experimentPattern,
+        currentSessionFilename: window.currentSessionFilename,
+        isHistoryLoad: isHistoryLoad
+    });
+    
+    if (testCode && !isHistoryLoad) {
         console.log('🔍 MULTI-FLUOROPHORE - Extracted test code for control grids:', testCode);
         
         // Clear any existing control grids first to prevent duplicates
@@ -915,10 +923,10 @@ async function displayMultiFluorophoreResults(results) {
                 createUniversalControlGrid(testCode, results.individual_results);
             }, 100);
         }
+    } else if (isHistoryLoad) {
+        console.log('🔍 MULTI-FLUOROPHORE - Skipping control grid creation for history load');
     } else {
         console.log('🔍 MULTI-FLUOROPHORE - Could not extract test code from pattern:', experimentPattern);
-        console.log('🔍 MULTI-FLUOROPHORE - Available amplification files:', Object.keys(amplificationFiles || {}));
-        console.log('🔍 MULTI-FLUOROPHORE - First file name:', Object.values(amplificationFiles || {})[0]?.fileName);
     }
     
     // Match curve details size to analysis summary
@@ -4185,8 +4193,36 @@ async function loadSessionDetails(sessionId) {
         // Display using multi-fluorophore layout (handles both single and multi-channel)
         displayMultiFluorophoreResults(transformedResults);
         
-        // Control grids are now handled within displayMultiFluorophoreResults - no need for duplicate creation
-        console.log('🔍 HISTORY LOAD - Control grids handled by displayMultiFluorophoreResults');
+        // Create control grids specifically for history loads (since displayMultiFluorophoreResults skips them for history)
+        console.log('🔍 HISTORY LOAD - Creating control grids for history session');
+        const testCode = extractTestCodeFromSession(session.filename);
+        if (testCode) {
+            console.log('🔍 HISTORY LOAD - Extracted test code:', testCode);
+            
+            // Clear any existing control grids first
+            const pathogenGridsContainer = document.getElementById('pathogenControlGrids');
+            if (pathogenGridsContainer) {
+                pathogenGridsContainer.innerHTML = '';
+                pathogenGridsContainer.style.display = 'none';
+            }
+            
+            // Use real pathogen grid system for history loads
+            if (window.showPathogenGridsWithData && typeof window.showPathogenGridsWithData === 'function') {
+                console.log('🔍 HISTORY LOAD - Using real pathogen grids system');
+                setTimeout(() => {
+                    window.showPathogenGridsWithData(testCode, []);
+                }, 200);
+            } else {
+                console.log('🔍 HISTORY LOAD - Fallback to universal control grid');
+                setTimeout(() => {
+                    createUniversalControlGrid(testCode, transformedResults.individual_results);
+                }, 200);
+            }
+        } else {
+            console.log('🔍 HISTORY LOAD - Could not extract test code from session filename:', session.filename);
+        }
+        
+        console.log('🔍 HISTORY LOAD - Control grids handled by dedicated history logic');
         
         // Trigger enhanced control validation display
         setTimeout(() => {
@@ -8833,6 +8869,25 @@ function extractTestCodeFromExperimentPattern(experimentPattern) {
 }
 
 // Pathogen control grid creation functions
+
+function extractTestCodeFromSession(sessionFilename) {
+    if (!sessionFilename) return null;
+    
+    console.log('🔍 Extracting test code from session filename:', sessionFilename);
+    
+    // Extract test code from session filename (handle both individual channels and multi-fluorophore)
+    if (sessionFilename.includes('BVAB') || sessionFilename.includes('AcBVAB')) return 'BVAB';
+    if (sessionFilename.includes('BVPanelPCR3') || sessionFilename.includes('AcBVPanelPCR3')) return 'BVPanelPCR3';
+    if (sessionFilename.includes('Cglab') || sessionFilename.includes('AcCglab')) return 'Cglab';
+    if (sessionFilename.includes('Ngon') || sessionFilename.includes('AcNgon')) return 'Ngon';
+    if (sessionFilename.includes('Ctrach') || sessionFilename.includes('AcCtrach')) return 'Ctrach';
+    if (sessionFilename.includes('Tvag') || sessionFilename.includes('AcTvag')) return 'Tvag';
+    if (sessionFilename.includes('Mgen') || sessionFilename.includes('AcMgen')) return 'Mgen';
+    if (sessionFilename.includes('Upar') || sessionFilename.includes('AcUpar')) return 'Upar';
+    if (sessionFilename.includes('Uure') || sessionFilename.includes('AcUure')) return 'Uure';
+    
+    return null;
+}
 
 
 function createIndividualPathogenGrid(pathogenName, controlSets, gridIndex) {

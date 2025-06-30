@@ -59,6 +59,24 @@ function showPathogenGridsWithData(testCode, controlSets) {
 function getRealControlValidationData() {
     console.log('🔍 CONTROL GRID DATA - Starting real control validation data extraction');
     console.log('🔍 CONTROL GRID DATA - Current analysis results available:', !!window.currentAnalysisResults);
+    
+    // Extract testCode from current session or filename pattern
+    let testCode = 'BVAB'; // Default fallback
+    if (window.currentSessionFilename) {
+        // Extract from session filename for history loads
+        if (window.currentSessionFilename.includes('BVAB')) testCode = 'BVAB';
+        else if (window.currentSessionFilename.includes('BVPanelPCR3')) testCode = 'BVPanelPCR3';
+        else if (window.currentSessionFilename.includes('Ngon')) testCode = 'Ngon';
+        else if (window.currentSessionFilename.includes('Cglab')) testCode = 'Cglab';
+    } else if (window.currentFilePattern) {
+        // Extract from file pattern for fresh uploads
+        if (window.currentFilePattern.includes('BVAB')) testCode = 'BVAB';
+        else if (window.currentFilePattern.includes('BVPanelPCR3')) testCode = 'BVPanelPCR3';
+        else if (window.currentFilePattern.includes('Ngon')) testCode = 'Ngon';
+        else if (window.currentFilePattern.includes('Cglab')) testCode = 'Cglab';
+    }
+    
+    console.log('🔍 CONTROL GRID DATA - Detected test code:', testCode);
     // Support both array and object for window.currentAnalysisResults
     let wellsArray = [];
     if (Array.isArray(window.currentAnalysisResults)) {
@@ -78,6 +96,10 @@ function getRealControlValidationData() {
         console.log('🔍 CONTROL DATA - No current analysis results available');
         return controlData;
     }
+    
+    // Get all fluorophores in the dataset for fallback assignment
+    const datasetFluorophores = [...new Set(wellsArray.map(w => w.fluorophore).filter(f => f && f !== 'Unknown'))];
+    console.log('🔍 CONTROL DATA - Dataset fluorophores:', datasetFluorophores);
     
     // First, show all unique sample names for debugging
     const allSampleNames = [...new Set(wellsArray.map(w => w.sample_name || 'UNNAMED'))];
@@ -112,9 +134,9 @@ function getRealControlValidationData() {
     // Extract control samples directly from analysis results
     // Use the same logic as the results table "Controls" filter
     function extractTestPattern(sampleName) {
-        if (!sampleName) return 'AcBVAB';
+        if (!sampleName) return `Ac${testCode}`;
         const match = sampleName.match(/^(Ac[A-Za-z]+)/);
-        return match ? match[1] : 'AcBVAB';
+        return match ? match[1] : `Ac${testCode}`;
     }
     const testPattern = wellsArray && wellsArray.length > 0 ? 
         extractTestPattern(wellsArray[0].sample_name || '') : 'AcBVAB';
@@ -122,7 +144,9 @@ function getRealControlValidationData() {
     wellsArray.forEach(well => {
         const sampleName = well.sample_name || '';
         const coordinate = well.well_id ? well.well_id.split('_')[0] : 'Unknown';
-        const fluorophore = well.well_id ? well.well_id.split('_')[1] : 'Unknown';
+        // Improved fluorophore assignment with fallbacks
+        const fluorophore = well.fluorophore || (well.well_id ? well.well_id.split('_')[1] : null) || 
+                          (datasetFluorophores.length === 1 ? datasetFluorophores[0] : 'Unknown');
         if (sampleName.startsWith(testPattern)) {
             controlSamples.push({
                 coordinate: coordinate,
@@ -215,7 +239,9 @@ function getRealControlValidationData() {
     wellsArray.forEach(well => {
         const sampleName = well.sample_name || '';
         const amplitude = well.amplitude || 0;
-        const fluorophore = well.well_id ? well.well_id.split('_')[1] : 'Unknown';
+        // Improved fluorophore assignment with fallbacks
+        const fluorophore = well.fluorophore || (well.well_id ? well.well_id.split('_')[1] : null) || 
+                          (datasetFluorophores.length === 1 ? datasetFluorophores[0] : 'Unknown');
         const coordinate = well.well_id ? well.well_id.split('_')[0] : 'Unknown';
         const controlInfo = coordinateToControlInfo[coordinate];
         if (controlInfo) {
@@ -415,8 +441,52 @@ function createTabbedPathogenGrids(container, testCode, controlData) {
     
     console.log(`🔍 PATHOGEN TABS - Filtered ${allPathogens.length} pathogens to ${pathogensWithData.length} with data`);
     
-    // If no pathogens have data, show a message
+    // If no pathogens have data, check if there's any control data at all before showing "no data" message
     if (pathogensWithData.length === 0) {
+        const totalControlDataKeys = Object.keys(controlData).length;
+        console.log(`🔍 PATHOGEN TABS - Total control data keys available: ${totalControlDataKeys}`);
+        
+        if (totalControlDataKeys > 0) {
+            // There is control data, but fluorophore filtering failed
+            console.log('🔍 PATHOGEN TABS - Control data exists but fluorophore filtering failed, using fallback approach');
+            
+            // Fallback: Show all pathogens and let each one try to find data
+            const pathogensWithFallback = allPathogens.map(pathogen => {
+                // Try to find any control data that could belong to this pathogen
+                const fallbackSets = {};
+                Object.keys(controlData).forEach(key => {
+                    const control = controlData[key];
+                    // If fluorophore matches, or if there's only one fluorophore in dataset
+                    if (control.fluorophore === pathogen.fluorophore || 
+                        control.fluorophore === 'Unknown' ||
+                        datasetFluorophores.length === 1) {
+                        const setNum = control.setNumber;
+                        if (!fallbackSets[setNum]) {
+                            fallbackSets[setNum] = {};
+                        }
+                        fallbackSets[setNum][control.controlType] = {
+                            coordinate: control.coordinate,
+                            amplitude: control.amplitude,
+                            isValid: control.isValid
+                        };
+                    }
+                });
+                return {
+                    ...pathogen,
+                    fallbackSets: fallbackSets,
+                    hasData: Object.keys(fallbackSets).length > 0
+                };
+            }).filter(p => p.hasData);
+            
+            if (pathogensWithFallback.length > 0) {
+                console.log(`🔍 PATHOGEN TABS - Fallback found ${pathogensWithFallback.length} pathogens with data`);
+                // Use fallback data for rendering
+                createTabbedPathogenGridsWithFallback(container, pathogensWithFallback, controlData);
+                return;
+            }
+        }
+        
+        // Only show "no control data" if there's actually no control data
         container.innerHTML = `
             <div class="no-control-data-message">
                 <p style="color: #888; font-style: italic; text-align: center; padding: 20px;">
@@ -629,10 +699,87 @@ function createSinglePathogenGrid(pathogen, controlSets) {
     return gridHTML;
 }
 
+function createTabbedPathogenGridsWithFallback(container, pathogensWithFallback, controlData) {
+    console.log(`🔍 FALLBACK TABS - Creating fallback tabs for ${pathogensWithFallback.length} pathogens`);
+    
+    // Create tabbed interface using fallback data
+    let tabsHTML = '<div class="pathogen-tabs-container">';
+    
+    // Tab headers (only for pathogens with fallback data)
+    if (pathogensWithFallback.length > 1) {
+        tabsHTML += '<div class="pathogen-tab-headers">';
+        pathogensWithFallback.forEach((pathogen, index) => {
+            const activeClass = index === 0 ? ' active' : '';
+            tabsHTML += `<button class="pathogen-tab-header${activeClass}" onclick="showPathogenTab('${pathogen.fluorophore}')">${pathogen.name}</button>`;
+        });
+        tabsHTML += '</div>';
+    }
+    
+    // Tab content using fallback sets
+    tabsHTML += '<div class="pathogen-tab-content">';
+    pathogensWithFallback.forEach((pathogen, index) => {
+        const activeClass = index === 0 ? ' active' : '';
+        const displayStyle = pathogensWithFallback.length === 1 ? 'block' : (index === 0 ? 'block' : 'none');
+        tabsHTML += `<div id="tab-${pathogen.fluorophore}" class="pathogen-tab-panel${activeClass}" style="display: ${displayStyle};">`;
+        
+        // Create grid using fallback sets
+        tabsHTML += createSinglePathogenControlGridFromFallback(pathogen, pathogen.fallbackSets);
+        tabsHTML += '</div>';
+    });
+    
+    tabsHTML += '</div></div>';
+    container.innerHTML = tabsHTML;
+}
 
+function createSinglePathogenControlGridFromFallback(pathogen, fallbackSets) {
+    let gridHTML = `<h4>${pathogen.name} Controls (${pathogen.fluorophore})</h4>`;
+    
+    if (Object.keys(fallbackSets).length === 0) {
+        return gridHTML + '<p>No control data available</p>';
+    }
+    
+    gridHTML += '<div class="pathogen-control-grid">';
+    
+    Object.keys(fallbackSets).sort().forEach(setNumber => {
+        const controlSet = fallbackSets[setNumber];
+        gridHTML += `<div class="control-set">`;
+        gridHTML += `<h5>Set ${setNumber}</h5>`;
+        
+        // Expected control types for validation grids
+        const expectedControls = ['H', 'M', 'L', 'NTC'];
+        expectedControls.forEach(controlType => {
+            const control = controlSet[controlType];
+            if (control) {
+                const statusClass = control.isValid ? 'valid' : 'invalid';
+                const amplitude = control.amplitude ? control.amplitude.toFixed(0) : 'N/A';
+                gridHTML += `
+                    <div class="control-well ${statusClass}">
+                        <div class="control-type">${controlType}</div>
+                        <div class="control-coordinate">${control.coordinate}</div>
+                        <div class="control-amplitude">${amplitude}</div>
+                    </div>
+                `;
+            } else {
+                gridHTML += `
+                    <div class="control-well missing">
+                        <div class="control-type">${controlType}</div>
+                        <div class="control-coordinate">-</div>
+                        <div class="control-amplitude">Missing</div>
+                    </div>
+                `;
+            }
+        });
+        
+        gridHTML += '</div>';
+    });
+    
+    gridHTML += '</div>';
+    return gridHTML;
+}
 
 // Export functions for use in main script
 window.showPathogenGridsWithData = showPathogenGridsWithData;
 window.createTabbedPathogenGrids = createTabbedPathogenGrids;
+window.createTabbedPathogenGridsWithFallback = createTabbedPathogenGridsWithFallback;
 window.showPathogenTab = showPathogenTab;
 window.getRealControlValidationData = getRealControlValidationData;
