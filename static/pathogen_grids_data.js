@@ -6,6 +6,8 @@
 function showPathogenGridsWithData(testCode, controlSets) {
     console.log('🔍 PATHOGEN GRID - showPathogenGridsWithData called with testCode:', testCode);
     console.log('🔍 PATHOGEN GRID - controlSets:', controlSets);
+    console.log('🔍 PATHOGEN GRID - window.currentAnalysisResults available:', !!window.currentAnalysisResults);
+    console.log('🔍 PATHOGEN GRID - currentAnalysisResults type:', typeof window.currentAnalysisResults);
     
     const container = document.getElementById('pathogenControlGrids');
     if (!container) {
@@ -18,6 +20,20 @@ function showPathogenGridsWithData(testCode, controlSets) {
     const controlValidationData = getRealControlValidationData();
     console.log('🔍 PATHOGEN GRID - Real control validation data received:', controlValidationData);
     console.log('🔍 PATHOGEN GRID - Control data keys count:', Object.keys(controlValidationData).length);
+    
+    // If no control data found, show debug info
+    if (Object.keys(controlValidationData).length === 0) {
+        console.log('🔍 PATHOGEN GRID - No control data found, debugging...');
+        if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+            const sampleWells = Object.entries(window.currentAnalysisResults.individual_results).slice(0, 5);
+            console.log('🔍 PATHOGEN GRID - Sample wells for debugging:', sampleWells.map(([key, well]) => ({
+                key, 
+                sampleName: well.sample_name, 
+                amplitude: well.amplitude,
+                fluorophore: well.fluorophore
+            })));
+        }
+    }
     
     container.style.display = 'block';
     container.innerHTML = '';
