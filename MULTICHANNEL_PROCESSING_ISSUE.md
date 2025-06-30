@@ -56,38 +56,80 @@ The core issue is **lack of proper transaction-like processing**:
 - No guarantee that one channel completes before starting the next
 - No final consolidation step that waits for all channels
 
+## Current Investigation Findings (June 30, 2025)
+
+### Current Architecture Analysis
+1. **Processing Flow**: 
+   - Individual channels processed independently via `/analyze` endpoint
+   - Results stored separately per channel with `save_individual_channel_session()`
+   - Multi-fluorophore combination handled by frontend `combineMultiFluorophoreResultsSQL()`
+   - Final combined session saved via `/sessions/save-combined` endpoint
+
+2. **JSON Handling Status**:
+   - ✅ **Backend Storage**: Uses `safe_json_dumps()` for database storage (strings)
+   - ✅ **Well Data**: Individual well results properly serialized to JSON strings
+   - ✅ **Frontend Processing**: Results converted to JSON objects for Chart.js
+   - ⚠️ **Timing Issue**: Frontend combination happens while individual channels still processing
+
+3. **Current Issues Identified**:
+   - **Race Conditions**: Frontend combines results before all channels complete processing
+   - **Asynchronous Processing**: No wait mechanism between channel processing steps
+   - **Threshold Loading**: Chart.js threshold drawing depends on complete data availability
+   - **Control Grid Creation**: Grids fail when channel data partially loaded
+
+### Root Cause Analysis (Updated)
+
+The core issue is **lack of proper transaction-like processing**:
+- Processes run asynchronously without proper completion waiting
+- No guarantee that one channel completes before starting the next
+- No final consolidation step that waits for all channels
+- Frontend initiates combination while backend still processing individual channels
+
+### Additional Complexity: JSON Serialization Requirements
+- **Database Storage**: Requires JSON strings for complex data structures ✅ **IMPLEMENTED**
+- **Frontend Display**: Requires JSON objects for Chart.js and UI components ✅ **IMPLEMENTED** 
+- **Session Management**: Data conversion needed when storing/retrieving from sessions ✅ **IMPLEMENTED**
+- **Current State**: JSON conversions implemented correctly but timing issues prevent proper completion
+- **Risk**: Race conditions cause incomplete data display rather than JSON corruption
+
 ## Proposed Solution
 
 ### New Branch Strategy: Background Channel Processing
 
-#### 1. Process Isolation by Channel
-- **Maximum 4 channels per test** (PCR machine hardware limitation)
-- **Each channel = 1 pathogen** in that specific test
-- Run each channel processing in the background
-- Complete ALL operations for one channel before starting the next
-- Implement transaction-like completion for each channel
+## Proposed Solution (Updated)
 
-#### 2. Channel Processing Transaction
-For each channel, complete in order:
-1. Data parsing and validation
-2. Curve fitting and analysis
-3. Threshold calculation and storage
-4. Chart preparation
-5. Control grid data preparation
-6. Database storage
+### New Branch Strategy: Sequential Channel Processing with Transaction Control
 
-#### 3. Final Consolidation Step
-- Wait for ALL channels to complete their transactions
-- Combine results from all channels
-- Update database with complete multichannel test
-- Render final UI with all channels, thresholds, and control grids
+#### 1. Backend Channel Processing Queue System
+- **Channel Processing Queue**: Process channels sequentially, not in parallel
+- **Transaction Per Channel**: Each channel completes ALL steps before next channel starts
+- **Database Locking**: Use database transactions to prevent race conditions
+- **Completion Tracking**: Track channel completion status in database
 
-#### 4. Implementation Approach
-- Create new branch for this refactor
-- Implement channel-by-channel background processing
-- Add proper completion checking/waiting mechanisms
-- Ensure transaction-like behavior for each channel
-- Add final consolidation step
+#### 2. Enhanced Channel Processing Transaction
+For each channel, complete in order with validation:
+1. **Data Parsing & Validation**: Validate input data structure
+2. **Curve Fitting & Analysis**: Complete all curve analysis for channel
+3. **Threshold Calculation**: Calculate and store thresholds for channel
+4. **JSON Serialization**: Convert all data to proper JSON strings for database
+5. **Database Transaction**: Atomic save of all channel data
+6. **Completion Flag**: Mark channel as complete in database
+7. **Verification**: Confirm data can be retrieved and parsed correctly
+
+#### 3. Frontend Coordination Layer
+- **Channel Status Polling**: Poll backend for channel completion status
+- **Sequential Processing**: Only start next channel after previous completes
+- **Progress Indicators**: Show real-time channel processing progress
+- **Final Consolidation Trigger**: Only combine results after ALL channels complete
+
+#### 4. Final Consolidation Transaction
+- **Completion Check**: Verify ALL required channels are complete
+- **Data Retrieval**: Fetch all channel data from database
+- **JSON Deserialization**: Convert JSON strings back to objects for frontend
+- **Combination Processing**: Combine all channel results
+- **Chart.js Preparation**: Prepare all threshold and curve data
+- **Control Grid Generation**: Create all control grids with complete data
+- **Final Save**: Save combined session with completion flag
 
 ## Expected Benefits
 
@@ -97,14 +139,36 @@ For each channel, complete in order:
 4. **Better Error Handling**: If one channel fails, others can still complete
 5. **Improved User Experience**: More predictable and reliable results
 
-## Next Steps
+## Next Steps (Updated Implementation Plan)
 
-1. Create new feature branch for multichannel processing refactor
-2. Implement background channel processing with transaction-like completion
-3. Add proper waiting mechanisms between channel processing
-4. Implement final consolidation step
-5. Test with both single and multichannel runs
-6. Verify threshold display and control grid creation work reliably
+1. ✅ **Created feature branch**: `feature/multichannel-background-processing`
+2. **Backend Queue System**: Implement channel processing queue with completion tracking
+3. **Frontend Coordination**: Add channel status polling and sequential processing
+4. **Database Enhancements**: Add channel completion status tracking
+5. **Testing**: Test with both single and multichannel runs
+6. **Validation**: Verify threshold display and control grid creation work reliably
+
+## Implementation Priority
+
+### Phase 1: Backend Channel Completion Tracking
+- Add `channel_completion_status` table to track processing state
+- Modify `save_individual_channel_session()` to mark completion
+- Add endpoint to check channel completion status
+
+### Phase 2: Frontend Sequential Processing
+- Replace parallel channel processing with sequential queue
+- Add channel completion polling before proceeding to next
+- Implement progress indicators for each channel
+
+### Phase 3: Transaction Safety
+- Wrap each channel processing in database transaction
+- Add rollback capability for failed channel processing
+- Implement retry mechanism for failed channels
+
+### Phase 4: Final Consolidation Control
+- Only trigger combination after ALL channels complete
+- Add verification of JSON data integrity before combination
+- Ensure threshold and control grid data is complete
 
 ## Technical Notes
 
