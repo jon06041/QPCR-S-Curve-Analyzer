@@ -627,6 +627,13 @@ async function performAnalysis() {
             currentAnalysisResults = singleResult;
             window.currentAnalysisResults = singleResult;
             
+            // Debug: Log the single result structure for control grid debugging
+            console.log('🔍 SINGLE-CHANNEL - Single result for control grid:', {
+                totalWells: Object.keys(singleResult.individual_results || {}).length,
+                fluorophore: fluorophores[0],
+                sampleKeys: Object.keys(singleResult.individual_results || {}).slice(0, 10)
+            });
+            
             const filename = amplificationFiles[fluorophores[0]].fileName;
             
             // Save single fluorophore session to database with proper well counts
@@ -645,6 +652,13 @@ async function performAnalysis() {
             // Set global variables for control grid access during fresh analysis
             currentAnalysisResults = combinedResults;
             window.currentAnalysisResults = combinedResults;
+            
+            // Debug: Log the combined results structure for control grid debugging
+            console.log('🔍 MULTI-CHANNEL - Combined results for control grid:', {
+                totalWells: Object.keys(combinedResults.individual_results || {}).length,
+                fluorophoreCount: combinedResults.fluorophore_count || 0,
+                sampleKeys: Object.keys(combinedResults.individual_results || {}).slice(0, 10)
+            });
             
             // Use the base pattern from the first file for consistent naming
             const firstFileName = Object.values(amplificationFiles)[0].fileName;
@@ -743,6 +757,9 @@ async function displayAnalysisResults(results) {
     // Display pathogen control grids for visual validation
     const testCode = extractTestCodeFromExperimentPattern(experimentPattern);
     console.log('🔍 FRESH UPLOAD - Creating control grid for testCode:', testCode);
+    console.log('🔍 FRESH UPLOAD - Experiment pattern:', experimentPattern);
+    console.log('🔍 FRESH UPLOAD - Current analysis results available:', !!currentAnalysisResults);
+    console.log('🔍 FRESH UPLOAD - Individual results count:', Object.keys(individualResults).length);
     
     if (testCode) {
         // Clear any existing control grids first to prevent duplicates
@@ -756,7 +773,7 @@ async function displayAnalysisResults(results) {
         if (window.showPathogenGridsWithData && typeof window.showPathogenGridsWithData === 'function') {
             console.log('🔍 FRESH UPLOAD - Using real pathogen grids system');
             setTimeout(() => {
-                window.showPathogenGridsWithData(testCode, []);
+                window.showPathogenGridsWithData(testCode, controlIssues || []);
             }, 100);
         } else {
             console.log('🔍 FRESH UPLOAD - Fallback to universal control grid');
@@ -766,6 +783,8 @@ async function displayAnalysisResults(results) {
         }
     } else {
         console.log('🔍 FRESH UPLOAD - Could not extract test code from pattern:', experimentPattern);
+        console.log('🔍 FRESH UPLOAD - Available amplification files:', Object.keys(amplificationFiles || {}));
+        console.log('🔍 FRESH UPLOAD - First file name:', Object.values(amplificationFiles || {})[0]?.fileName);
     }
     
     populateWellSelector(individualResults);
@@ -868,6 +887,10 @@ async function displayMultiFluorophoreResults(results) {
     // Create control grids for fresh multi-fluorophore analysis
     console.log('🔍 MULTI-FLUOROPHORE - Creating control grids for fresh analysis');
     const testCode = extractTestCodeFromExperimentPattern(experimentPattern);
+    console.log('🔍 MULTI-FLUOROPHORE - Experiment pattern:', experimentPattern);
+    console.log('🔍 MULTI-FLUOROPHORE - Current analysis results available:', !!currentAnalysisResults);
+    console.log('🔍 MULTI-FLUOROPHORE - Individual results count:', Object.keys(results.individual_results).length);
+    
     if (testCode) {
         console.log('🔍 MULTI-FLUOROPHORE - Extracted test code for control grids:', testCode);
         
@@ -892,6 +915,8 @@ async function displayMultiFluorophoreResults(results) {
         }
     } else {
         console.log('🔍 MULTI-FLUOROPHORE - Could not extract test code from pattern:', experimentPattern);
+        console.log('🔍 MULTI-FLUOROPHORE - Available amplification files:', Object.keys(amplificationFiles || {}));
+        console.log('🔍 MULTI-FLUOROPHORE - First file name:', Object.values(amplificationFiles || {})[0]?.fileName);
     }
     
     // Match curve details size to analysis summary

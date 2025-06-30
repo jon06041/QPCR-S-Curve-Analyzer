@@ -364,47 +364,73 @@ function extractCoordinateFromWellId(wellId) {
 }
 
 function createTabbedPathogenGrids(container, testCode, controlData) {
-    let pathogens = [];
+    let allPathogens = [];
     
     if (testCode === 'BVAB') {
-        pathogens = [
+        allPathogens = [
             { name: 'BVAB1', fluorophore: 'HEX' },
             { name: 'BVAB2', fluorophore: 'FAM' },
             { name: 'BVAB3', fluorophore: 'Cy5' }
         ];
     } else if (testCode === 'BVPanelPCR3') {
-        pathogens = [
+        allPathogens = [
             { name: 'Bifidobacterium breve', fluorophore: 'Cy5' },
             { name: 'Gardnerella vaginalis', fluorophore: 'FAM' },
             { name: 'Lactobacillus acidophilus', fluorophore: 'HEX' },
             { name: 'Prevotella bivia', fluorophore: 'Texas Red' }
         ];
     } else if (testCode === 'Cglab') {
-        pathogens = [
+        allPathogens = [
             { name: 'Candida glabrata', fluorophore: 'FAM' }
         ];
     } else if (testCode === 'Ngon') {
-        pathogens = [
+        allPathogens = [
             { name: 'Neisseria gonhorrea', fluorophore: 'HEX' }
         ];
     }
     
-    // Create tabbed interface
+    // Filter pathogens to only include those with actual control data
+    const pathogensWithData = allPathogens.filter(pathogen => {
+        const controlSets = getControlSetsForPathogen(pathogen.fluorophore, controlData);
+        const hasData = Object.keys(controlSets).length > 0;
+        console.log(`🔍 PATHOGEN FILTER - ${pathogen.name} (${pathogen.fluorophore}): ${hasData ? 'HAS DATA' : 'NO DATA'} (sets: ${Object.keys(controlSets).length})`);
+        return hasData;
+    });
+    
+    console.log(`🔍 PATHOGEN TABS - Filtered ${allPathogens.length} pathogens to ${pathogensWithData.length} with data`);
+    
+    // If no pathogens have data, show a message
+    if (pathogensWithData.length === 0) {
+        container.innerHTML = `
+            <div class="no-control-data-message">
+                <p style="color: #888; font-style: italic; text-align: center; padding: 20px;">
+                    No control data available for ${testCode} test
+                </p>
+            </div>
+        `;
+        console.log('🔍 PATHOGEN TABS - No control data found for any pathogen');
+        return;
+    }
+    
+    // Create tabbed interface only for pathogens with data
     let tabsHTML = '<div class="pathogen-tabs-container">';
     
-    // Tab headers
-    tabsHTML += '<div class="pathogen-tab-headers">';
-    pathogens.forEach((pathogen, index) => {
-        const activeClass = index === 0 ? ' active' : '';
-        tabsHTML += `<button class="pathogen-tab-header${activeClass}" onclick="showPathogenTab('${pathogen.fluorophore}')">${pathogen.name}</button>`;
-    });
-    tabsHTML += '</div>';
+    // Tab headers (only for pathogens with data)
+    if (pathogensWithData.length > 1) {
+        tabsHTML += '<div class="pathogen-tab-headers">';
+        pathogensWithData.forEach((pathogen, index) => {
+            const activeClass = index === 0 ? ' active' : '';
+            tabsHTML += `<button class="pathogen-tab-header${activeClass}" onclick="showPathogenTab('${pathogen.fluorophore}')">${pathogen.name}</button>`;
+        });
+        tabsHTML += '</div>';
+    }
     
     // Tab content
     tabsHTML += '<div class="pathogen-tab-content">';
-    pathogens.forEach((pathogen, index) => {
+    pathogensWithData.forEach((pathogen, index) => {
         const activeClass = index === 0 ? ' active' : '';
-        tabsHTML += `<div id="tab-${pathogen.fluorophore}" class="pathogen-tab-panel${activeClass}">`;
+        const displayStyle = pathogensWithData.length === 1 ? 'block' : (index === 0 ? 'block' : 'none');
+        tabsHTML += `<div id="tab-${pathogen.fluorophore}" class="pathogen-tab-panel${activeClass}" style="display: ${displayStyle};">`;
         tabsHTML += createSinglePathogenControlGrid(pathogen, controlData);
         tabsHTML += '</div>';
     });
@@ -413,7 +439,7 @@ function createTabbedPathogenGrids(container, testCode, controlData) {
     tabsHTML += '</div>';
     
     container.innerHTML = tabsHTML;
-    console.log('Tabbed pathogen grids created for', testCode);
+    console.log(`🔍 PATHOGEN TABS - Tabbed pathogen grids created for ${testCode} with ${pathogensWithData.length} pathogen(s)`);
 }
 
 function createSinglePathogenControlGrid(pathogen, controlData) {
