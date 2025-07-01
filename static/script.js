@@ -1,3 +1,542 @@
+// --- Thresholds ---
+// Store per-channel, per-scale thresholds: { [channel]: { linear: value, log: value } }
+let channelThresholds = {};
+// Store current scale mode: 'linear' or 'log'
+let currentScaleMode = 'linear';
+// Store current threshold multiplier (slider value)
+let currentThresholdMultiplier = 1.0;
+
+// --- ENHANCED PER-CHANNEL THRESHOLD SYSTEM ---
+// This replaces the existing threshold calculation logic with a stable, 
+// per-channel system that maintains consistency across all views
+
+// Global threshold storage
+if (!window.stableChannelThresholds) {
+    window.stableChannelThresholds = {}; // { channel: { linear: value, log: value } }
+}
+
+// Control wells storage for threshold calculation  
+if (!window.channelControlWells) {
+    window.channelControlWells = {}; // { channel: [wells...] }
+}
+
+/**
+ * Extract and categorize control wells for each channel from analysis results
+ */
+function extractChannelControlWells() {
+    if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {
+        console.log('No analysis results available for control extraction');
+        return;
+    }
+    
+    window.channelControlWells = {};
+    const results = currentAnalysisResults.individual_results;
+    
+    // Group wells by channel (fluorophore)
+    Object.keys(results).forEach(wellKey => {
+        const well = results[wellKey];
+        const fluorophore = well.fluorophore;
+        const sampleName = well.sample_name || '';
+        
+        if (!fluorophore) return;
+        
+        // Initialize channel if not exists
+        if (!window.channelControlWells[fluorophore]) {
+            window.channelControlWells[fluorophore] = {
+                NTC: [],
+                H: [],
+                M: [],
+                L: [],
+                other: []
+            };
+        }
+        
+        // Categorize control wells based on sample name
+        if (sampleName.toLowerCase().includes('ntc') || sampleName.toLowerCase().includes('negative')) {
+            window.channelControlWells[fluorophore].NTC.push(well);
+        } else if (sampleName.toLowerCase().includes('h') && (sampleName.includes('control') || sampleName.includes('pos'))) {
+            window.channelControlWells[fluorophore].H.push(well);
+        } else if (sampleName.toLowerCase().includes('m') && (sampleName.includes('control') || sampleName.includes('pos'))) {
+            window.channelControlWells[fluorophore].M.push(well);
+        } else if (sampleName.toLowerCase().includes('l') && (sampleName.includes('control') || sampleName.includes('pos'))) {
+            window.channelControlWells[fluorophore].L.push(well);
+        } else if (sampleName.toLowerCase().includes('control') || sampleName.toLowerCase().includes('blank')) {
+            window.channelControlWells[fluorophore].other.push(well);
+        }
+    });
+    
+    console.log('🔍 THRESHOLD - Extracted control wells by channel:', window.channelControlWells);
+}
+
+/**
+ * Calculate stable threshold for a specific channel and scale
+ */
+function calculateStableChannelThreshold(channel, scale) {
+    console.log(`🔍 THRESHOLD - Calculating ${scale} threshold for channel: ${channel}`);
+    
+    if (!window.channelControlWells[channel]) {
+        console.warn(`No control wells found for channel: ${channel}`);
+        return scale === 'log' ? 1.0 : 100.0; // Fallback values
+    }
+    
+    const controls = window.channelControlWells[channel];
+    let thresholdWells = [];
+    
+    // Prefer NTC controls, fallback to other controls
+    if (controls.NTC.length > 0) {
+        thresholdWells = controls.NTC;
+        console.log(`🔍 THRESHOLD - Using ${controls.NTC.length} NTC controls for ${channel}`);
+    } else if (controls.other.length > 0) {
+        thresholdWells = controls.other;
+        console.log(`🔍 THRESHOLD - Using ${controls.other.length} other controls for ${channel}`);
+    } else {
+        console.warn(`No suitable control wells for threshold calculation in ${channel}`);
+        return scale === 'log' ? 1.0 : 100.0;
+    }
+    
+    // Extract RFU values from control wells (early cycles for baseline)
+    const controlRfuValues = [];
+    thresholdWells.forEach(well => {
+        try {
+            let rfu = well.raw_rfu;
+            if (typeof rfu === 'string') rfu = JSON.parse(rfu);
+            if (Array.isArray(rfu)) {
+                // Use first 5 cycles for baseline calculation
+                for (let i = 0; i < Math.min(5, rfu.length); i++) {
+                    if (rfu[i] != null && rfu[i] > 0) {
+                        controlRfuValues.push(rfu[i]);
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('Error parsing RFU data for control well:', well.well_id, e);
+        }
+    });
+    
+    if (controlRfuValues.length === 0) {
+        console.warn(`No valid RFU data found in control wells for ${channel}`);
+        return scale === 'log' ? 1.0 : 100.0;
+    }
+    
+    // Calculate baseline statistics
+    const mean = controlRfuValues.reduce((sum, val) => sum + val, 0) / controlRfuValues.length;
+    const variance = controlRfuValues.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / controlRfuValues.length;
+    const stdDev = Math.sqrt(variance);
+    
+    let threshold;
+    if (scale === 'log') {
+        // For log scale: use minimum + margin for visibility
+        const minRfu = Math.min(...controlRfuValues);
+        threshold = Math.max(minRfu * 1.5, mean + stdDev, 0.1);
+    } else {
+        // For linear scale: baseline + 10x standard deviation (classic qPCR threshold)
+        threshold = mean + (10 * stdDev);
+        threshold = Math.max(threshold, mean * 1.5); // At least 50% above baseline
+    }
+    
+    console.log(`🔍 THRESHOLD - ${channel} ${scale}: Mean=${mean.toFixed(2)}, StdDev=${stdDev.toFixed(2)}, Threshold=${threshold.toFixed(2)}`);
+    return threshold;
+}
+
+/**
+ * Initialize thresholds for all channels when analysis results are loaded
+ */
+function initializeChannelThresholds() {
+    console.log('🔍 THRESHOLD-INIT - Initializing channel thresholds');
+    
+    // Multiple null checks for robustness
+    if (!currentAnalysisResults) {
+        console.warn('🔍 THRESHOLD-INIT - currentAnalysisResults is null, skipping initialization');
+        return;
+    }
+    
+    if (!currentAnalysisResults.individual_results) {
+        console.warn('🔍 THRESHOLD-INIT - individual_results is null, skipping initialization');
+        return;
+    }
+    
+    if (typeof currentAnalysisResults.individual_results !== 'object') {
+        console.warn('🔍 THRESHOLD-INIT - individual_results is not an object, skipping initialization');
+        return;
+    }
+    
+    // Extract all unique channels from fluorophore properties in wells
+    const channels = new Set();
+    try {
+        Object.keys(currentAnalysisResults.individual_results).forEach(wellKey => {
+            const well = currentAnalysisResults.individual_results[wellKey];
+            if (well && well.fluorophore) {
+                channels.add(well.fluorophore);
+            }
+        });
+    } catch (e) {
+        console.error('🔍 THRESHOLD-INIT - Error extracting channels:', e);
+        return;
+    }
+    
+    if (channels.size === 0) {
+        console.warn('🔍 THRESHOLD-INIT - No channels found');
+        return;
+    }
+    
+    console.log(`🔍 THRESHOLD-INIT - Found channels: [${Array.from(channels).join(', ')}]`);
+    
+    // Calculate and store thresholds for each channel and scale
+    channels.forEach(channel => {
+        try {
+            ['linear', 'log'].forEach(scale => {
+                const threshold = calculateChannelThreshold(channel, scale);
+                setChannelThreshold(channel, scale, threshold);
+                console.log(`🔍 THRESHOLD-INIT - ${channel} ${scale}: ${threshold.toFixed(2)}`);
+            });
+        } catch (e) {
+            console.error(`🔍 THRESHOLD-INIT - Error calculating thresholds for channel ${channel}:`, e);
+        }
+    });
+    
+    // Update UI to reflect initialized thresholds
+    updateSliderUI();
+    
+    // Update chart annotations with new thresholds
+    setTimeout(() => {
+        console.log('🔍 THRESHOLD-INIT - Triggering chart threshold updates');
+        updateAllChannelThresholds();
+    }, 200);
+}
+
+/**
+ * Get the current threshold for a channel and scale, applying the slider multiplier
+ */
+function getCurrentChannelThreshold(channel, scale = null) {
+    if (!scale) scale = currentScaleMode;
+    
+    // Load from storage if not in memory
+    if (!window.stableChannelThresholds[channel] && sessionStorage.getItem('stableChannelThresholds')) {
+        try {
+            window.stableChannelThresholds = JSON.parse(sessionStorage.getItem('stableChannelThresholds'));
+        } catch (e) {
+            console.warn('Error loading thresholds from storage:', e);
+        }
+    }
+    
+    if (!window.stableChannelThresholds[channel] || !window.stableChannelThresholds[channel][scale]) {
+        console.warn(`No threshold found for ${channel} ${scale}, calculating...`);
+        const baseThreshold = calculateStableChannelThreshold(channel, scale);
+        if (!window.stableChannelThresholds[channel]) window.stableChannelThresholds[channel] = {};
+        window.stableChannelThresholds[channel][scale] = baseThreshold;
+    }
+    
+    const baseThreshold = window.stableChannelThresholds[channel][scale];
+    
+    // Apply slider multiplier
+    if (scale === 'linear') {
+        return baseThreshold * currentThresholdMultiplier;
+    } else {
+        // For log scale, multiplier adjusts the minimum visible range, not threshold
+        return baseThreshold;
+    }
+}
+
+/**
+ * Update all chart threshold annotations when scale or multiplier changes
+ */
+function updateAllChannelThresholds() {
+    console.log('🔍 THRESHOLD - Updating all channel thresholds');
+    
+    if (!window.amplificationChart) return;
+    
+    // Get current chart annotations
+    const annotations = window.amplificationChart.options.plugins?.annotation?.annotations || {};
+    
+    // Update threshold lines for all visible channels
+    const visibleChannels = new Set();
+    if (window.amplificationChart.data && window.amplificationChart.data.datasets) {
+        window.amplificationChart.data.datasets.forEach(dataset => {
+            // Extract channel from dataset label
+            const match = dataset.label?.match(/\(([^)]+)\)/);
+            if (match) visibleChannels.add(match[1]);
+        });
+    }
+    
+    // Clear old threshold annotations
+    Object.keys(annotations).forEach(key => {
+        if (key.startsWith('threshold_')) {
+            delete annotations[key];
+        }
+    });
+    
+    // Add new threshold annotations for visible channels
+    Array.from(visibleChannels).forEach(channel => {
+        const threshold = getCurrentChannelThreshold(channel, currentScaleMode);
+        const annotationKey = `threshold_${channel}`;
+        
+        annotations[annotationKey] = {
+            type: 'line',
+            yMin: threshold,
+            yMax: threshold,
+            borderColor: getChannelColor(channel),
+            borderWidth: 2,
+            borderDash: [5, 5],
+            label: {
+                display: true,
+                content: `${channel}: ${threshold.toFixed(2)}`,
+                position: 'start',
+                backgroundColor: 'rgba(255,255,255,0.8)',
+                color: getChannelColor(channel),
+                font: { size: 10, weight: 'bold' }
+            }
+        };
+    });
+    
+    // Update chart
+    if (window.amplificationChart.options && window.amplificationChart.options.plugins) {
+        window.amplificationChart.options.plugins.annotation = { annotations };
+    }
+    window.amplificationChart.update('none');
+    
+    console.log(`🔍 THRESHOLD - Updated thresholds for channels: ${Array.from(visibleChannels).join(', ')}`);
+}
+
+/**
+ * Get a distinct color for each channel
+ */
+function getChannelColor(channel) {
+    const colorMap = {
+        'FAM': '#2ecc71',    // Green
+        'HEX': '#f39c12',    // Orange  
+        'Cy5': '#e74c3c',    // Red
+        'Texas Red': '#9b59b6', // Purple
+        'ROX': '#34495e'     // Dark gray
+    };
+    return colorMap[channel] || '#3498db'; // Default blue
+}
+
+// ...existing code...
+
+// --- UI Elements ---
+const scaleToggleBtn = document.getElementById('scaleToggle');
+const scaleRangeSlider = document.getElementById('scaleRangeSlider');
+const scaleRangeLabel = document.getElementById('scaleRangeLabel');
+const scaleMultiplierLabel = document.getElementById('scaleMultiplier');
+const scaleDescription = document.getElementById('scaleDescription');
+const scalePresetsContainer = document.getElementById('scalePresetsContainer');
+
+// --- Advanced Threshold Calculation ---
+function calculateChannelThreshold(channel, scale) {
+    console.log(`🔍 THRESHOLD-CALC - Calculating ${scale} threshold for channel: ${channel}`);
+    
+    // Multiple null checks for robustness
+    if (!currentAnalysisResults) {
+        console.warn('🔍 THRESHOLD-CALC - currentAnalysisResults is null');
+        return scale === 'log' ? 10 : 100;
+    }
+    
+    if (!currentAnalysisResults.individual_results) {
+        console.warn('🔍 THRESHOLD-CALC - individual_results is null');
+        return scale === 'log' ? 10 : 100;
+    }
+    
+    if (typeof currentAnalysisResults.individual_results !== 'object') {
+        console.warn('🔍 THRESHOLD-CALC - individual_results is not an object');
+        return scale === 'log' ? 10 : 100;
+    }
+    
+    // Get all wells for this channel (by fluorophore)
+    const channelWells = Object.keys(currentAnalysisResults.individual_results)
+        .map(wellKey => currentAnalysisResults.individual_results[wellKey])
+        .filter(well => well != null && well.fluorophore === channel); // Filter by fluorophore property
+    
+    if (channelWells.length === 0) {
+        console.warn(`🔍 THRESHOLD-CALC - No wells found for channel: ${channel}`);
+        return scale === 'log' ? 10 : 100;
+    }
+    
+    console.log(`🔍 THRESHOLD-CALC - Found ${channelWells.length} wells for channel ${channel}`);
+    
+    if (scale === 'log') {
+        return calculateLogThreshold(channelWells, channel);
+    } else {
+        return calculateLinearThreshold(channelWells, channel);
+    }
+}
+
+function calculateLogThreshold(channelWells, channel) {
+    console.log(`🔍 LOG-THRESHOLD - Calculating log threshold for ${channelWells.length} wells in channel: ${channel}`);
+    
+    // Collect amplification values from cycles 1-5 across all wells in this channel
+    const cycles1to5Values = [];
+    
+    channelWells.forEach(well => {
+        if (well.raw_data && Array.isArray(well.raw_data)) {
+            // Take first 5 cycles (indices 0-4)
+            const earlyCycles = well.raw_data.slice(0, 5);
+            earlyCycles.forEach(cycleData => {
+                if (cycleData && typeof cycleData.y === 'number' && cycleData.y > 0) {
+                    cycles1to5Values.push(cycleData.y);
+                }
+            });
+        } else if (well.raw_rfu) {
+            // Try to parse raw_rfu data
+            try {
+                let rfuValues = typeof well.raw_rfu === 'string' ? JSON.parse(well.raw_rfu) : well.raw_rfu;
+                if (Array.isArray(rfuValues)) {
+                    // Take first 5 values
+                    const earlyCycles = rfuValues.slice(0, 5);
+                    earlyCycles.forEach(value => {
+                        if (typeof value === 'number' && value > 0) {
+                            cycles1to5Values.push(value);
+                        }
+                    });
+                }
+            } catch (e) {
+                console.warn('🔍 LOG-THRESHOLD - Error parsing raw_rfu for well:', well.well_id);
+            }
+        }
+    });
+    
+    if (cycles1to5Values.length === 0) {
+        console.warn(`🔍 LOG-THRESHOLD - No early cycle data found for channel: ${channel}`);
+        return 10; // fallback
+    }
+    
+    // Calculate standard deviation of cycles 1-5
+    const mean = cycles1to5Values.reduce((sum, val) => sum + val, 0) / cycles1to5Values.length;
+    const variance = cycles1to5Values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / cycles1to5Values.length;
+    const stdDev = Math.sqrt(variance);
+    
+    // Log threshold = 10x standard deviation
+    const logThreshold = 10 * stdDev;
+    
+    console.log(`🔍 LOG-THRESHOLD - Channel: ${channel}, Values: ${cycles1to5Values.length}, Mean: ${mean.toFixed(2)}, StdDev: ${stdDev.toFixed(2)}, Threshold: ${logThreshold.toFixed(2)}`);
+    
+    return Math.max(logThreshold, 1); // Ensure minimum threshold of 1
+}
+
+function calculateLinearThreshold(channelWells, channel) {
+    console.log(`🔍 LINEAR-THRESHOLD - Calculating linear threshold for ${channelWells.length} wells in channel: ${channel}`);
+    
+    // Use NTC wells if available, otherwise use all control wells, otherwise use all wells
+    let controlWells = channelWells.filter(well => 
+        well.sample_name && well.sample_name.toLowerCase().includes('ntc')
+    );
+    
+    if (controlWells.length === 0) {
+        // Fallback to other control types
+        controlWells = channelWells.filter(well => 
+            well.sample_name && /\b(control|ctrl|neg|positive|h[0-9]|m[0-9]|l[0-9])\b/i.test(well.sample_name)
+        );
+    }
+    
+    if (controlWells.length === 0) {
+        console.warn(`🔍 LINEAR-THRESHOLD - No control wells found for channel: ${channel}, using all wells`);
+        controlWells = channelWells;
+    }
+    
+    console.log(`🔍 LINEAR-THRESHOLD - Using ${controlWells.length} control wells for channel: ${channel}`);
+    
+    // Calculate inflection point thresholds: RFU = L/2 + B
+    const inflectionThresholds = [];
+    
+    controlWells.forEach(well => {
+        if (well.amplitude && well.baseline && 
+            typeof well.amplitude === 'number' && typeof well.baseline === 'number') {
+            
+            // Inflection point: L/2 + B
+            const inflectionPoint = (well.amplitude / 2) + well.baseline;
+            inflectionThresholds.push(inflectionPoint);
+            
+            console.log(`🔍 LINEAR-THRESHOLD - Well: ${well.well_id}, L: ${well.amplitude.toFixed(2)}, B: ${well.baseline.toFixed(2)}, Inflection: ${inflectionPoint.toFixed(2)}`);
+        }
+    });
+    
+    if (inflectionThresholds.length === 0) {
+        console.warn(`🔍 LINEAR-THRESHOLD - No valid sigmoid parameters found for channel: ${channel}`);
+        return 100; // fallback
+    }
+    
+    // Use median of inflection points for robustness
+    inflectionThresholds.sort((a, b) => a - b);
+    const median = inflectionThresholds.length % 2 === 0
+        ? (inflectionThresholds[inflectionThresholds.length / 2 - 1] + inflectionThresholds[inflectionThresholds.length / 2]) / 2
+        : inflectionThresholds[Math.floor(inflectionThresholds.length / 2)];
+    
+    console.log(`🔍 LINEAR-THRESHOLD - Channel: ${channel}, Inflection points: [${inflectionThresholds.map(t => t.toFixed(2)).join(', ')}], Median: ${median.toFixed(2)}`);
+    
+    return Math.max(median, 10); // Ensure minimum threshold of 10
+}
+
+function setChannelThreshold(channel, scale, value) {
+    if (!channelThresholds[channel]) channelThresholds[channel] = {};
+    channelThresholds[channel][scale] = value;
+    // Persist in sessionStorage
+    sessionStorage.setItem('channelThresholds', JSON.stringify(channelThresholds));
+}
+
+function getChannelThreshold(channel, scale) {
+    if (channelThresholds[channel] && channelThresholds[channel][scale] != null) {
+        return channelThresholds[channel][scale];
+    }
+    // If not set, calculate and store
+    const base = calculateChannelThreshold(channel, scale);
+    setChannelThreshold(channel, scale, base);
+    return base;
+}
+
+function loadChannelThresholds() {
+    const stored = sessionStorage.getItem('channelThresholds');
+    if (stored) {
+        channelThresholds = JSON.parse(stored);
+    }
+}
+
+// --- Slider Logic ---
+function updateSliderUI() {
+    // Always show slider for both scales
+    if (scaleRangeLabel) scaleRangeLabel.textContent = currentScaleMode === 'log' ? 'Log Range:' : 'Linear Range:';
+    if (scaleMultiplierLabel) scaleMultiplierLabel.textContent = currentThresholdMultiplier.toFixed(2) + 'x';
+    if (scaleDescription) scaleDescription.textContent = currentScaleMode === 'log' ? 'Adjust log threshold' : 'Adjust linear threshold';
+}
+
+function onSliderChange(e) {
+    currentThresholdMultiplier = parseFloat(e.target.value);
+    updateSliderUI();
+    updateChartThresholds();
+}
+
+function onPresetClick(e) {
+    const val = parseFloat(e.target.getAttribute('data-value'));
+    currentThresholdMultiplier = val;
+    if (scaleRangeSlider) scaleRangeSlider.value = val;
+    updateSliderUI();
+    updateChartThresholds();
+}
+
+function onScaleToggle() {
+    currentScaleMode = (currentScaleMode === 'linear') ? 'log' : 'linear';
+    if (scaleToggleBtn) scaleToggleBtn.setAttribute('data-scale', currentScaleMode);
+    // Update UI
+    updateSliderUI();
+    updateChartThresholds();
+}
+
+function updateChartThresholds() {
+    console.log('🔍 CHART-THRESHOLD - Updating chart thresholds (delegating to updateAllChannelThresholds)');
+    updateAllChannelThresholds();
+}
+
+// --- Initialization ---
+document.addEventListener('DOMContentLoaded', function() {
+    loadChannelThresholds();
+    // Attach slider and preset events
+    if (scaleRangeSlider) scaleRangeSlider.addEventListener('input', onSliderChange);
+    if (scalePresetsContainer) {
+        scalePresetsContainer.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.addEventListener('click', onPresetClick);
+        });
+    }
+    if (scaleToggleBtn) scaleToggleBtn.addEventListener('click', onScaleToggle);
+    updateSliderUI();
+});
 // ========================================
 // MULTICHANNEL SEQUENTIAL PROCESSING FUNCTIONS
 // Phase 2: Frontend Sequential Processing with Real-time Status
@@ -65,6 +604,7 @@ async function processChannelsSequentially(fluorophores, experimentPattern) {
 
 /**
  * Analyze a single channel with proper error handling and backend coordination
+ * Includes mock backend support for testing when Flask backend is not available
  */
 async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
     console.log(`🔍 SINGLE-CHANNEL - Analyzing ${fluorophore} channel`);
@@ -95,48 +635,73 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
             fluorophore: fluorophore
         });
         
-        // Perform the actual analysis via backend
-        const response = await fetch('/analyze', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Filename': amplificationFiles[fluorophore]?.fileName || `${fluorophore}.csv`,
-                'X-Fluorophore': fluorophore
-            },
-            body: JSON.stringify(payload)
+        let result;
+        
+        // Try to perform the actual analysis via backend
+        try {
+            const response = await fetch('/analyze', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Filename': amplificationFiles[fluorophore]?.fileName || `${fluorophore}.csv`,
+                    'X-Fluorophore': fluorophore
+                },
+                body: JSON.stringify(payload)
+            });
+            
+            if (!response.ok) {
+                let errorMessage = `HTTP ${response.status}`;
+                try {
+                    // Clone the response to read it multiple times if needed
+                    const responseClone = response.clone();
+                    const errorData = await responseClone.json();
+                    errorMessage = errorData.error || errorData.message || errorMessage;
+                } catch (jsonError) {
+                    // If we can't parse JSON, try to get the text from the original response
+                    try {
+                        const errorText = await response.text();
+                        if (errorText) {
+                            errorMessage = `${errorMessage}: ${errorText}`;
+                        }
+                    } catch (textError) {
+                        console.error(`❌ SINGLE-CHANNEL - Could not read error response for ${fluorophore}:`, textError);
+                    }
+                }
+                throw new Error(`Backend analysis failed for ${fluorophore}: ${errorMessage}`);
+            }
+            
+            try {
+                result = await response.json();
+                console.log(`🔍 SINGLE-CHANNEL - Backend response received for ${fluorophore}`);
+            } catch (jsonError) {
+                console.error(`❌ SINGLE-CHANNEL - Failed to parse JSON response for ${fluorophore}:`, jsonError);
+                throw new Error(`Invalid JSON response from backend for ${fluorophore}: ${jsonError.message}`);
+            }
+            
+        } catch (networkError) {
+            // If backend is not available, use mock data for testing
+            console.warn(`⚠️ SINGLE-CHANNEL - Backend not available for ${fluorophore}, using mock data:`, networkError.message);
+            console.log(`🔧 MOCK-MODE - Generating mock analysis results for ${fluorophore}`);
+            
+            result = createMockAnalysisResponse(fluorophore);
+        }
+        
+        // 🔍 ROBUST-NULL-CHECK: Enhanced result validation
+        console.log(`🔍 SINGLE-CHANNEL - Raw backend response for ${fluorophore}:`, {
+            resultExists: !!result,
+            resultType: typeof result,
+            resultKeys: result ? Object.keys(result) : 'N/A',
+            hasIndividualResults: !!(result && result.individual_results),
+            individualResultsType: result && result.individual_results ? typeof result.individual_results : 'none'
         });
         
-        if (!response.ok) {
-            let errorMessage = `HTTP ${response.status}`;
-            try {
-                // Clone the response to read it multiple times if needed
-                const responseClone = response.clone();
-                const errorData = await responseClone.json();
-                errorMessage = errorData.error || errorData.message || errorMessage;
-            } catch (jsonError) {
-                // If we can't parse JSON, try to get the text from the original response
-                try {
-                    const errorText = await response.text();
-                    if (errorText) {
-                        errorMessage = `${errorMessage}: ${errorText}`;
-                    }
-                } catch (textError) {
-                    console.error(`❌ SINGLE-CHANNEL - Could not read error response for ${fluorophore}:`, textError);
-                }
-            }
-            throw new Error(`Backend analysis failed for ${fluorophore}: ${errorMessage}`);
+        if (!result) {
+            throw new Error(`Backend returned null/undefined result for ${fluorophore}`);
         }
         
-        let result;
-        try {
-            result = await response.json();
-        } catch (jsonError) {
-            console.error(`❌ SINGLE-CHANNEL - Failed to parse JSON response for ${fluorophore}:`, jsonError);
-            throw new Error(`Invalid JSON response from backend for ${fluorophore}: ${jsonError.message}`);
-        }
-        
-        if (!result || !result.individual_results) {
-            throw new Error(`Analysis returned invalid results for ${fluorophore}`);
+        if (!result.individual_results) {
+            console.error(`❌ SINGLE-CHANNEL - Missing individual_results for ${fluorophore}. Result structure:`, result);
+            throw new Error(`Backend response missing individual_results for ${fluorophore}`);
         }
         
         // 🔍 DATA-FORMAT-CONVERSION: Handle backend string to frontend object conversion
@@ -147,18 +712,23 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
         });
         
         // Convert individual_results from string to object if needed
-        if (typeof result.individual_results === 'string') {
+        if (result.individual_results && typeof result.individual_results === 'string') {
             try {
                 result.individual_results = JSON.parse(result.individual_results);
                 console.log(`🔍 SINGLE-CHANNEL - Successfully parsed individual_results string to object for ${fluorophore}`);
             } catch (parseError) {
                 console.error(`❌ SINGLE-CHANNEL - Failed to parse individual_results for ${fluorophore}:`, parseError);
-                throw new Error(`Invalid JSON format in individual_results for ${fluorophore}`);
+                throw new Error(`Invalid JSON format in individual_results for ${fluorophore}: ${parseError.message}`);
             }
         }
         
-        // Ensure we have a valid object
+        // Final validation - ensure we have a valid object
         if (!result.individual_results || typeof result.individual_results !== 'object') {
+            console.error(`❌ SINGLE-CHANNEL - Final validation failed for ${fluorophore}:`, {
+                hasIndividualResults: !!result.individual_results,
+                individualResultsType: typeof result.individual_results,
+                resultStructure: result
+            });
             throw new Error(`Individual results is not a valid object for ${fluorophore}`);
         }
         
@@ -545,7 +1115,7 @@ function toggleWellSortMode() {
         filterWellsByFluorophore(selectedFluorophore);
     }
     // Re-populate the table with the new sort mode
-    if (currentAnalysisResults && typeof populateResultsTable === 'function') {
+    if (currentAnalysisResults && currentAnalysisResults.individual_results && typeof populateResultsTable === 'function') {
         populateResultsTable(currentAnalysisResults.individual_results);
     }
 }
@@ -1031,6 +1601,11 @@ async function performAnalysis() {
             currentAnalysisResults = singleResult;
             window.currentAnalysisResults = singleResult;
             
+            // Initialize channel thresholds after analysis results are loaded
+            setTimeout(() => {
+                initializeChannelThresholds();
+            }, 100);
+            
             // Debug: Log the single result structure for control grid debugging
             console.log('🔍 SINGLE-CHANNEL - Single result for control grid:', {
                 totalWells: Object.keys(singleResult.individual_results || {}).length,
@@ -1096,6 +1671,11 @@ async function performAnalysis() {
             // Set global variables for control grid access during fresh analysis
             currentAnalysisResults = combinedResults;
             window.currentAnalysisResults = combinedResults;
+            
+            // Initialize channel thresholds after analysis results are loaded
+            setTimeout(() => {
+                initializeChannelThresholds();
+            }, 100);
             
             // Debug: Log the combined results structure for control grid debugging
             console.log('🔍 MULTI-CHANNEL - Combined results for control grid:', {
@@ -1587,7 +2167,10 @@ function populateFluorophoreSelector(individualResults) {
 }
 
 function filterWellsByFluorophore(selectedFluorophore) {
-    if (!currentAnalysisResults) return;
+    if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {
+        console.warn('🔍 FILTER-WELLS - No analysis results or individual_results available');
+        return;
+    }
     
     const wellSelector = document.getElementById('wellSelect');
     if (!wellSelector) return;
@@ -2163,48 +2746,19 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
         });
     }
     
-    // Prepare annotation for threshold if present
-    let annotation = undefined;
-    console.log('[Chart.js][updateChart] wellResult:', wellResult);
-    console.log('[Chart.js][updateChart] threshold_value debug:', {
-        threshold_value: wellResult ? wellResult.threshold_value : 'wellResult is null',
-        type: wellResult ? typeof wellResult.threshold_value : 'N/A',
-        isNull: wellResult ? (wellResult.threshold_value == null) : 'N/A',
-        isNaN: wellResult ? isNaN(wellResult.threshold_value) : 'N/A'
-    });
-    if (wellResult && wellResult.threshold_value != null && !isNaN(wellResult.threshold_value)) {
-        annotation = {
-            annotations: {
-                threshold: {
-                    type: 'line',
-                    yMin: wellResult.threshold_value,
-                    yMax: wellResult.threshold_value,
-                    borderColor: 'black',
-                    borderWidth: 2,
-                    label: {
-                        display: true,
-                        content: 'threshold',
-                        color: 'black',
-                        backgroundColor: 'white',
-                        position: 'end',
-                        font: { weight: 'bold' }
-                    }
-                }
-            }
-        };
-        console.log('[Chart.js][updateChart] threshold annotation config:', annotation);
-    } else {
-        console.log('[Chart.js][updateChart] No threshold annotation for this well. threshold_value:', wellResult ? wellResult.threshold_value : undefined);
-    }
-    
+    // Create chart with stable threshold system
     const chartConfig = createChartConfiguration(
         'scatter', 
         datasets, 
-        `qPCR Amplification Curve - ${wellId} (${fluorophore})`,
-        annotation
+        `qPCR Amplification Curve - ${wellId} (${fluorophore})`
     );
     
     window.amplificationChart = new Chart(ctx, chartConfig);
+    
+    // Apply stable threshold system after chart creation
+    setTimeout(() => {
+        updateChartThresholds();
+    }, 100);
 }
 
 // Utility functions
@@ -7695,6 +8249,11 @@ function updateChartDisplayMode() {
 }
 
 function showSelectedCurve(wellKey) {
+    if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {
+        console.warn('🔍 SHOW-SELECTED-CURVE - No analysis results available');
+        return;
+    }
+    
     const wellData = currentAnalysisResults.individual_results[wellKey];
     if (!wellData) return;
     
@@ -7780,67 +8339,24 @@ function showAllCurves(selectedFluorophore) {
         });
     }
     
-    // Temporarily remove performance limit to debug chart rendering
-    // if (datasets.length > 50) {
-    //     console.log(`Limiting display to first 50 curves (out of ${datasets.length})`);
-    //     datasets.splice(50);
-    // }
-    
-    // Create chart with all curves
-    // Collect all unique threshold values for displayed wells
-    // Only show one threshold per channel (fluorophore) in multi-curve view
-    const fluorThresholds = {};
-    Object.keys(results).forEach((wellKey) => {
-        const wellData = results[wellKey];
-        if (selectedFluorophore !== 'all' && wellData.fluorophore !== selectedFluorophore) return;
-        if (wellData.threshold_value != null && !isNaN(wellData.threshold_value)) {
-            const fluor = wellData.fluorophore || 'Unknown';
-            // Only set the first threshold found for each fluorophore
-            if (!(fluor in fluorThresholds)) {
-                fluorThresholds[fluor] = Number(wellData.threshold_value);
-            }
-        }
-    });
-    let annotation = undefined;
-    if (Object.keys(fluorThresholds).length > 0) {
-        let annos = {};
-        let idx = 1;
-        Object.entries(fluorThresholds).forEach(([fluor, val]) => {
-            let labelText = `threshold (${fluor})`;
-            annos[`threshold${idx}`] = {
-                type: 'line',
-                yMin: val,
-                yMax: val,
-                borderColor: 'black',
-                borderWidth: 2,
-                label: {
-                    display: true,
-                    content: labelText,
-                    color: 'black',
-                    backgroundColor: 'white',
-                    position: 'end',
-                    font: { weight: 'bold' }
-                }
-            };
-            idx++;
-        });
-        annotation = { annotations: annos };
-        console.log('[Chart.js][showAllCurves] fluorThresholds:', fluorThresholds);
-        console.log('[Chart.js][showAllCurves] annotation config:', annotation);
-    } else {
-        console.log('[Chart.js][showAllCurves] No threshold annotations. fluorThresholds:', fluorThresholds);
-    }
+    // Create chart with stable threshold system
     
     const chartConfig = createChartConfiguration(
         'line', 
         datasets, 
-        `All Curves - ${selectedFluorophore === 'all' ? 'All Fluorophores' : selectedFluorophore}`,
-        annotation
+        `All Curves - ${selectedFluorophore === 'all' ? 'All Fluorophores' : selectedFluorophore}`
     );
     
     // Override some options for multi-curve display
     chartConfig.options.plugins.legend.display = false;
     chartConfig.options.plugins.tooltip.enabled = false;
+    
+    window.amplificationChart = new Chart(ctx, chartConfig);
+    
+    // Apply stable threshold system after chart creation
+    setTimeout(() => {
+        updateChartThresholds();
+    }, 100);
     
     window.amplificationChart = new Chart(ctx, chartConfig);
 }
@@ -8153,104 +8669,24 @@ function showResultsFiltered(selectedFluorophore, resultType) {
         return;
     }
     
-    // Create chart with filtered results
-    // Collect all threshold values per fluorophore, then use median per channel
-    const channelThresholds = {};
-    Object.keys(results).forEach((wellKey) => {
-        const wellData = results[wellKey];
-        const amplitude = wellData.amplitude || 0;
-        let shouldInclude = false;
-        const isGoodSCurve = wellData.is_good_scurve || false;
-        switch (resultType) {
-            case 'pos':
-                shouldInclude = isGoodSCurve && amplitude > 500;
-                break;
-            case 'neg':
-                shouldInclude = amplitude < 400;
-                break;
-            case 'redo':
-                shouldInclude = amplitude >= 400 && amplitude <= 500;
-                break;
-        }
-        if (!shouldInclude) return;
-        if (selectedFluorophore !== 'all' && wellData.fluorophore !== selectedFluorophore) return;
-        if (wellData.threshold_value != null && !isNaN(wellData.threshold_value) && wellData.fluorophore) {
-            const fluor = wellData.fluorophore;
-            if (!channelThresholds[fluor]) channelThresholds[fluor] = [];
-            channelThresholds[fluor].push(Number(wellData.threshold_value));
-        }
-    });
-    let annotation = undefined;
-    if (Object.keys(channelThresholds).length > 0) {
-        let annos = {};
-        let idx = 1;
-        Object.entries(channelThresholds).forEach(([fluor, thresholds]) => {
-            if (thresholds.length > 0) {
-                const sorted = thresholds.slice().sort((a, b) => a - b);
-                const median = sorted[Math.floor(sorted.length / 2)];
-                let labelText = `threshold (${fluor})`;
-                annos[`threshold${idx}`] = {
-                    type: 'line',
-                    yMin: median,
-                    yMax: median,
-                    borderColor: getFluorophoreColor(fluor),
-                    borderWidth: 2,
-                    label: {
-                        display: true,
-                        content: labelText,
-                        color: getFluorophoreColor(fluor),
-                        backgroundColor: 'white',
-                        position: 'end',
-                        font: { weight: 'bold' }
-                    }
-                };
-                idx++;
-            }
-        });
-        annotation = { annotations: annos };
-    }
-    window.amplificationChart = new Chart(ctx, {
-        type: 'line',
-        data: { datasets },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                title: {
-                    display: true,
-                    text: `${resultType.toUpperCase()} Results Only - ${selectedFluorophore === 'all' ? 'All Fluorophores' : selectedFluorophore}`,
-                    font: { size: 16, weight: 'bold' }
-                },
-                legend: {
-                    display: datasets.length <= 10 // Show legend only for reasonable number of curves
-                },
-                tooltip: {
-                    enabled: datasets.length <= 20 // Disable tooltips for better performance with many curves
-                },
-                ...(annotation ? { annotation } : {})
-            },
-            scales: {
-                x: {
-                    type: 'linear',
-                    title: { display: true, text: 'Cycle Number', font: { size: 14 } },
-                    grid: { color: 'rgba(0,0,0,0.1)' }
-                },
-                y: {
-                    type: 'linear',
-                    title: { display: true, text: 'RFU (Relative Fluorescence Units)', font: { size: 14 } },
-                    grid: { color: 'rgba(0,0,0,0.1)' }
-                }
-            },
-            elements: {
-                point: {
-                    radius: 0
-                },
-                line: {
-                    tension: 0.1
-                }
-            }
-        }
-    });
+    // Create chart with stable threshold system
+    const chartConfig = createChartConfiguration(
+        'line', 
+        datasets, 
+        `${resultType.toUpperCase()} Results Only - ${selectedFluorophore === 'all' ? 'All Fluorophores' : selectedFluorophore}`
+    );
+    
+    // Override some options for filtered display
+    chartConfig.options.plugins.legend.display = datasets.length <= 10;
+    chartConfig.options.plugins.tooltip.enabled = datasets.length <= 20;
+    chartConfig.options.elements.point.radius = 0;
+    
+    window.amplificationChart = new Chart(ctx, chartConfig);
+    
+    // Apply stable threshold system after chart creation
+    setTimeout(() => {
+        updateChartThresholds();
+    }, 100);
 }
 
 function getFluorophoreColor(fluorophore) {
@@ -8329,146 +8765,171 @@ function calculateThresholdForWell(wellData) {
 }
 
 function updateThresholdAnnotations() {
-    if (!window.amplificationChart || !currentAnalysisResults) return;
+    if (!window.amplificationChart || !currentAnalysisResults || !currentAnalysisResults.individual_results) return;
     
-    // Get current well or fluorophore being displayed
+    // Get current display context
     const selectedWell = document.getElementById('wellSelect')?.value;
     const selectedFluorophore = document.getElementById('fluorophoreSelect')?.value;
     
+    let annotations = {};
+    
     if (selectedWell && selectedWell !== 'all') {
-        // Single well view - calculate threshold for this specific well
+        // Single well view - show threshold for this well's fluorophore
         const wellKey = Object.keys(currentAnalysisResults.individual_results || {})
             .find(key => key.startsWith(selectedWell));
         
         if (wellKey) {
             const wellData = currentAnalysisResults.individual_results[wellKey];
-            const thresholdData = calculateThresholdForWell(wellData);
+            const fluorophore = wellData.fluorophore;
+            const threshold = getScaledThreshold(fluorophore);
             
-            if (thresholdData) {
-                updateChartWithThreshold(thresholdData.threshold, wellData.fluorophore);
+            if (threshold) {
+                annotations.thresholdLine = createThresholdAnnotation(threshold, fluorophore);
             }
         }
+        
     } else if (selectedFluorophore && selectedFluorophore !== 'all') {
-        // Fluorophore view - calculate average threshold for this fluorophore
-        const fluorophoreWells = Object.values(currentAnalysisResults.individual_results || {})
-            .filter(well => well.fluorophore === selectedFluorophore);
+        // Single fluorophore view - show threshold for this fluorophore
+        const threshold = getScaledThreshold(selectedFluorophore);
         
-        const thresholds = fluorophoreWells
-            .map(well => calculateThresholdForWell(well))
-            .filter(t => t !== null)
-            .map(t => t.threshold);
+        if (threshold) {
+            annotations.thresholdLine = createThresholdAnnotation(threshold, selectedFluorophore);
+        }
         
-        if (thresholds.length > 0) {
-            const avgThreshold = thresholds.reduce((sum, t) => sum + t, 0) / thresholds.length;
-            updateChartWithThreshold(avgThreshold, selectedFluorophore);
+    } else {
+        // All wells view - show thresholds for all visible fluorophores
+        const visibleFluorophores = getVisibleFluorophores();
+        let annotationIndex = 0;
+        
+        visibleFluorophores.forEach(fluorophore => {
+            const threshold = getScaledThreshold(fluorophore);
+            if (threshold) {
+                annotations[`threshold_${fluorophore}`] = createThresholdAnnotation(
+                    threshold, 
+                    fluorophore, 
+                    getFluorophoreColor(fluorophore),
+                    annotationIndex
+                );
+                annotationIndex++;
+            }
+        });
+    }
+    
+    // Update chart annotations
+    if (!window.amplificationChart || !window.amplificationChart.options) return;
+    
+    if (Object.keys(annotations).length > 0) {
+        if (window.amplificationChart.options.plugins) {
+            window.amplificationChart.options.plugins.annotation = { annotations };
+        }
+    } else {
+        // Remove annotations if none
+        if (window.amplificationChart.options.plugins && window.amplificationChart.options.plugins.annotation) {
+            delete window.amplificationChart.options.plugins.annotation;
         }
     }
+    
+    window.amplificationChart.update('none');
+}
+
+function createThresholdAnnotation(threshold, fluorophore, color = 'red', index = 0) {
+    const adjustedThreshold = currentChartScale === 'logarithmic' ? 
+        Math.max(threshold, currentLogMin || 0.1) : threshold;
+    
+    return {
+        type: 'line',
+        yMin: adjustedThreshold,
+        yMax: adjustedThreshold,
+        borderColor: color || getFluorophoreColor(fluorophore),
+        borderWidth: 2,
+        borderDash: [5, 5],
+        label: {
+            content: `${fluorophore}: ${adjustedThreshold.toFixed(2)} (${currentThresholdMultiplier.toFixed(1)}x)`,
+            enabled: true,
+            position: index % 2 === 0 ? 'start' : 'end',
+            backgroundColor: color || getFluorophoreColor(fluorophore),
+            color: 'white',
+            font: { weight: 'bold', size: 10 },
+            padding: 4
+        }
+    };
+}
+
+function getVisibleFluorophores() {
+    if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {
+        return [];
+    }
+    
+    const fluorophores = new Set();
+    const chartData = window.amplificationChart?.data?.datasets || [];
+    
+    // Get fluorophores from currently displayed datasets
+    chartData.forEach(dataset => {
+        if (dataset.label) {
+            const match = dataset.label.match(/\(([^)]+)\)$/);
+            if (match) {
+                fluorophores.add(match[1]);
+            }
+        }
+    });
+    
+    return Array.from(fluorophores);
+}
+
+function getFluorophoreColor(fluorophore) {
+    const colors = {
+        'Cy5': '#ff6b6b',
+        'FAM': '#4ecdc4', 
+        'HEX': '#45b7d1',
+        'Texas Red': '#f9ca24'
+    };
+    return colors[fluorophore] || '#333333';
 }
 
 function updateChartWithThreshold(threshold, fluorophore) {
-    if (!window.amplificationChart) return;
+    // Legacy function - redirect to new system
+    if (!window.amplificationChart || !window.amplificationChart.options) return;
     
-    // Ensure threshold is visible on current scale
-    let adjustedThreshold = threshold;
-    if (currentChartScale === 'logarithmic') {
-        adjustedThreshold = Math.max(threshold, 0.1);
-    }
-    
-    const annotation = {
-        annotations: {
-            thresholdLine: {
-                type: 'line',
-                yMin: adjustedThreshold,
-                yMax: adjustedThreshold,
-                borderColor: 'rgba(255, 0, 0, 0.8)',
-                borderWidth: 2,
-                borderDash: [8, 4],
-                label: {
-                    content: currentChartScale === 'logarithmic' ? 
-                        `Threshold: ${adjustedThreshold.toFixed(1)}` : 
-                        `Threshold: ${adjustedThreshold.toFixed(2)}`,
-                    enabled: true,
-                    position: 'start',
-                    backgroundColor: 'rgba(255, 0, 0, 0.9)',
-                    color: 'white',
-                    font: { weight: 'bold', size: 11 },
-                    padding: 4,
-                    borderColor: 'rgba(255, 0, 0, 0.8)',
-                    borderWidth: 1,
-                    cornerRadius: 4
-                }
-            }
-        }
+    const annotations = {
+        thresholdLine: createThresholdAnnotation(threshold, fluorophore)
     };
     
-    // Add baseline reference line for better context
-    if (currentAnalysisResults && currentAnalysisResults.individual_results) {
-        const wellKey = Object.keys(currentAnalysisResults.individual_results)[0];
-        if (wellKey) {
-            const wellData = currentAnalysisResults.individual_results[wellKey];
-            const thresholdData = calculateThresholdForWell(wellData);
-            
-            if (thresholdData && thresholdData.baseline) {
-                let adjustedBaseline = thresholdData.baseline;
-                if (currentChartScale === 'logarithmic') {
-                    adjustedBaseline = Math.max(thresholdData.baseline, 0.1);
-                }
-                
-                annotation.annotations.baselineLine = {
-                    type: 'line',
-                    yMin: adjustedBaseline,
-                    yMax: adjustedBaseline,
-                    borderColor: 'rgba(0, 150, 0, 0.6)',
-                    borderWidth: 1,
-                    borderDash: [4, 4],
-                    label: {
-                        content: `Baseline: ${adjustedBaseline.toFixed(2)}`,
-                        enabled: true,
-                        position: 'end',
-                        backgroundColor: 'rgba(0, 150, 0, 0.8)',
-                        color: 'white',
-                        font: { size: 10 },
-                        padding: 3
-                    }
-                };
-            }
-        }
+    if (window.amplificationChart.options.plugins) {
+        window.amplificationChart.options.plugins.annotation = { annotations };
     }
-    
-    // Update chart options with new annotation
-    window.amplificationChart.options.plugins.annotation = annotation;
     window.amplificationChart.update('none');
-    
-    console.log(`Threshold line updated: ${adjustedThreshold.toFixed(3)} (scale: ${currentChartScale})`);
 }
 
-// --- Chart Scale Toggle Functionality ---
+
+// --- Enhanced Chart Scale Toggle Functionality ---
 let currentChartScale = 'linear'; // Default to linear scale
-let currentLogMin = 0.1; // Default log minimum
-let currentLogMax = 'auto'; // Default log maximum
+let currentLogMin = 0.1; // Default log minimum for backward compatibility
+// (Removed duplicate threshold variables; use the global ones at the top of the file)
 
 function initializeChartToggle() {
     const toggleBtn = document.getElementById('scaleToggle');
     const scaleRangeContainer = document.getElementById('scaleRangeContainer');
     const scalePresetsContainer = document.getElementById('scalePresetsContainer');
     const scaleRangeSlider = document.getElementById('scaleRangeSlider');
-    const scaleMinValue = document.getElementById('scaleMinValue');
+    const scaleRangeLabel = document.getElementById('scaleRangeLabel');
+    const scaleMultiplier = document.getElementById('scaleMultiplier');
+    const scaleDescription = document.getElementById('scaleDescription');
     
     if (!toggleBtn) return;
     
     // Initialize from sessionStorage if available
     const savedScale = sessionStorage.getItem('qpcr_chart_scale');
-    const savedLogMin = sessionStorage.getItem('qpcr_log_min');
+    const savedMultiplier = sessionStorage.getItem('qpcr_threshold_multiplier');
     
     if (savedScale && (savedScale === 'linear' || savedScale === 'logarithmic')) {
         currentChartScale = savedScale;
         updateToggleAppearance(currentChartScale);
     }
     
-    if (savedLogMin) {
-        currentLogMin = parseFloat(savedLogMin);
-        if (scaleRangeSlider) scaleRangeSlider.value = currentLogMin;
-        if (scaleMinValue) scaleMinValue.textContent = currentLogMin;
+    if (savedMultiplier) {
+        currentThresholdMultiplier = parseFloat(savedMultiplier);
+        if (scaleRangeSlider) scaleRangeSlider.value = currentThresholdMultiplier;
+        updateSliderDisplay();
     }
     
     // Toggle button event listener
@@ -8482,34 +8943,40 @@ function initializeChartToggle() {
         // Update toggle appearance
         updateToggleAppearance(currentChartScale);
         
-        // Show/hide scale controls
-        if (currentChartScale === 'logarithmic') {
-            if (scaleRangeContainer) scaleRangeContainer.style.display = 'flex';
-            if (scalePresetsContainer) scalePresetsContainer.style.display = 'flex';
-        } else {
-            if (scaleRangeContainer) scaleRangeContainer.style.display = 'none';
-            if (scalePresetsContainer) scalePresetsContainer.style.display = 'none';
-        }
+        // Update slider configuration based on scale
+        updateSliderConfiguration();
         
         // Update chart if it exists
         updateChartScale();
         
         // Recalculate and update thresholds for new scale
         setTimeout(() => {
-            updateThresholdAnnotations();
+            updateAllThresholds();
         }, 100);
     });
     
     // Slider event listener
     if (scaleRangeSlider) {
         scaleRangeSlider.addEventListener('input', function() {
-            currentLogMin = parseFloat(this.value);
-            sessionStorage.setItem('qpcr_log_min', currentLogMin);
-            if (scaleMinValue) scaleMinValue.textContent = currentLogMin;
+            const value = parseFloat(this.value);
+            
+            if (currentChartScale === 'linear') {
+                currentThresholdMultiplier = value;
+                sessionStorage.setItem('qpcr_threshold_multiplier', currentThresholdMultiplier);
+            } else {
+                // For log scale, this controls the minimum value
+                currentLogMin = value;
+                sessionStorage.setItem('qpcr_log_min', currentLogMin);
+            }
+            
+            updateSliderDisplay();
             
             // Update chart in real-time
-            if (currentChartScale === 'logarithmic') {
-                updateChartScale();
+            updateChartScale();
+            
+            // Update thresholds if in linear mode
+            if (currentChartScale === 'linear') {
+                updateAllThresholds();
             }
         });
     }
@@ -8518,29 +8985,118 @@ function initializeChartToggle() {
     const presetButtons = document.querySelectorAll('.preset-btn');
     presetButtons.forEach(btn => {
         btn.addEventListener('click', function() {
-            const minValue = parseFloat(this.getAttribute('data-min'));
-            currentLogMin = minValue;
+            const value = parseFloat(this.getAttribute('data-value'));
             
-            // Update UI
-            if (scaleRangeSlider) scaleRangeSlider.value = minValue;
-            if (scaleMinValue) scaleMinValue.textContent = minValue;
+            if (currentChartScale === 'linear') {
+                currentThresholdMultiplier = value;
+                if (scaleRangeSlider) scaleRangeSlider.value = value;
+                sessionStorage.setItem('qpcr_threshold_multiplier', currentThresholdMultiplier);
+            } else {
+                // For log scale presets (future enhancement)
+                const logValue = value * 10; // Convert multiplier to log minimum
+                currentLogMin = logValue;
+                if (scaleRangeSlider) scaleRangeSlider.value = logValue;
+                sessionStorage.setItem('qpcr_log_min', currentLogMin);
+            }
+            
+            updateSliderDisplay();
             
             // Update active preset
             presetButtons.forEach(b => b.classList.remove('active'));
             this.classList.add('active');
             
-            // Save and update chart
-            sessionStorage.setItem('qpcr_log_min', currentLogMin);
-            if (currentChartScale === 'logarithmic') {
-                updateChartScale();
+            // Update chart and thresholds
+            updateChartScale();
+            if (currentChartScale === 'linear') {
+                updateAllThresholds();
             }
         });
     });
     
-    // Initialize visibility based on current scale
-    if (currentChartScale === 'logarithmic') {
-        if (scaleRangeContainer) scaleRangeContainer.style.display = 'flex';
-        if (scalePresetsContainer) scalePresetsContainer.style.display = 'flex';
+    // Initialize slider configuration
+    updateSliderConfiguration();
+}
+
+function updateSliderConfiguration() {
+    const scaleRangeSlider = document.getElementById('scaleRangeSlider');
+    const scaleRangeLabel = document.getElementById('scaleRangeLabel');
+    const presetButtons = document.querySelectorAll('.preset-btn');
+    
+    if (currentChartScale === 'linear') {
+        // Linear scale: threshold multiplier (0.1x to 10x)
+        if (scaleRangeSlider) {
+            scaleRangeSlider.min = '0.1';
+            scaleRangeSlider.max = '10';
+            scaleRangeSlider.step = '0.1';
+            scaleRangeSlider.value = currentThresholdMultiplier;
+        }
+        if (scaleRangeLabel) scaleRangeLabel.textContent = 'Threshold Scale:';
+        
+        // Update preset buttons for linear scale
+        const presetValues = [
+            { value: 0.5, text: '0.5x', desc: 'Conservative' },
+            { value: 1.0, text: '1.0x', desc: 'Standard' },
+            { value: 2.0, text: '2.0x', desc: 'Strict' },
+            { value: 5.0, text: '5.0x', desc: 'Very Strict' }
+        ];
+        
+        presetButtons.forEach((btn, index) => {
+            if (presetValues[index]) {
+                btn.setAttribute('data-value', presetValues[index].value);
+                btn.textContent = presetValues[index].text;
+                btn.title = presetValues[index].desc;
+            }
+        });
+        
+    } else {
+        // Log scale: minimum value (0.1 to 100)
+        if (scaleRangeSlider) {
+            scaleRangeSlider.min = '0.1';
+            scaleRangeSlider.max = '100';
+            scaleRangeSlider.step = '0.1';
+            scaleRangeSlider.value = currentLogMin || 0.1;
+        }
+        if (scaleRangeLabel) scaleRangeLabel.textContent = 'Log Range:';
+        
+        // Update preset buttons for log scale
+        const logPresetValues = [
+            { value: 0.1, text: 'Noise', desc: 'Show all noise' },
+            { value: 1.0, text: 'Low', desc: 'Low signal focus' },
+            { value: 10, text: 'Mid', desc: 'Mid-range focus' },
+            { value: 100, text: 'High', desc: 'High signal only' }
+        ];
+        
+        presetButtons.forEach((btn, index) => {
+            if (logPresetValues[index]) {
+                btn.setAttribute('data-value', logPresetValues[index].value);
+                btn.textContent = logPresetValues[index].text;
+                btn.title = logPresetValues[index].desc;
+            }
+        });
+    }
+    
+    updateSliderDisplay();
+}
+
+function updateSliderDisplay() {
+    const scaleMultiplier = document.getElementById('scaleMultiplier');
+    const scaleDescription = document.getElementById('scaleDescription');
+    
+    if (currentChartScale === 'linear') {
+        if (scaleMultiplier) scaleMultiplier.textContent = `${currentThresholdMultiplier.toFixed(1)}x`;
+        if (scaleDescription) {
+            if (currentThresholdMultiplier < 1) {
+                scaleDescription.textContent = 'More sensitive';
+            } else if (currentThresholdMultiplier > 1) {
+                scaleDescription.textContent = 'Less sensitive';
+            } else {
+                scaleDescription.textContent = 'Base threshold';
+            }
+        }
+    } else {
+        const minValue = currentLogMin || 0.1;
+        if (scaleMultiplier) scaleMultiplier.textContent = `${minValue}`;
+        if (scaleDescription) scaleDescription.textContent = 'Log minimum';
     }
 }
 
@@ -8563,28 +9119,32 @@ function updateToggleAppearance(scale) {
 }
 
 function updateChartScale() {
-    if (!window.amplificationChart) return;
+    if (!window.amplificationChart || !window.amplificationChart.options) return;
     
     // Store current annotation data before updating
-    const currentAnnotations = window.amplificationChart.options.plugins.annotation?.annotations || {};
+    const currentAnnotations = window.amplificationChart.options.plugins?.annotation?.annotations || {};
     
     // Get new scale configuration
     const newScaleConfig = getScaleConfiguration();
     
     // Update the y-axis configuration
-    window.amplificationChart.options.scales.y = newScaleConfig;
+    if (window.amplificationChart.options.scales) {
+        window.amplificationChart.options.scales.y = newScaleConfig;
+    }
     
     // For logarithmic scale, ensure all data points are visible
     if (currentChartScale === 'logarithmic') {
         // Process datasets to handle zero or negative values
-        window.amplificationChart.data.datasets.forEach(dataset => {
-            if (dataset.data) {
-                dataset.data = dataset.data.map(point => ({
-                    x: point.x,
-                    y: Math.max(point.y, currentLogMin) // Use slider minimum value
-                }));
-            }
-        });
+        if (window.amplificationChart.data && window.amplificationChart.data.datasets) {
+            window.amplificationChart.data.datasets.forEach(dataset => {
+                if (dataset.data) {
+                    dataset.data = dataset.data.map(point => ({
+                        x: point.x,
+                        y: Math.max(point.y, currentLogMin) // Use slider minimum value
+                    }));
+                }
+            });
+        }
         
         // Adjust threshold annotations for log scale visibility
         Object.keys(currentAnnotations).forEach(key => {
@@ -8604,7 +9164,7 @@ function updateChartScale() {
     }
     
     // Restore annotations
-    if (Object.keys(currentAnnotations).length > 0) {
+    if (Object.keys(currentAnnotations).length > 0 && window.amplificationChart.options.plugins) {
         window.amplificationChart.options.plugins.annotation = { annotations: currentAnnotations };
     }
     
@@ -8680,7 +9240,7 @@ function getScaleConfiguration() {
         return {
             ...baseConfig,
             type: 'logarithmic',
-            min: currentLogMin, // Use slider value
+            min: currentLogMin, // Use slider value for log minimum
             title: { 
                 ...baseConfig.title,
                 text: `RFU (log scale, min: ${currentLogMin})`
@@ -8704,7 +9264,7 @@ function getScaleConfiguration() {
             type: 'linear',
             title: { 
                 ...baseConfig.title,
-                text: 'RFU (Relative Fluorescence Units)'
+                text: `RFU (Linear, ${currentThresholdMultiplier.toFixed(1)}x threshold)`
             },
             min: function(context) {
                 const data = context.chart.data.datasets[0]?.data;

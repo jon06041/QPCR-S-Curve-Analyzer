@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>qPCR Debug Test</title>
+</head>
+<body>
+    <h1>qPCR Analysis Debug Test</h1>
+    <button id="testBackend">Test Backend Connection</button>
+    <div id="results"></div>
+    
+    <script>
+        document.getElementById('testBackend').addEventListener('click', async () => {
+            const results = document.getElementById('results');
+            
+            try {
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Filename': 'test.csv',
+                        'X-Fluorophore': 'FAM'
+                    },
+                    body: JSON.stringify({
+                        analysis_data: [],
+                        samples_data: null
+                    })
+                });
+                
+                results.innerHTML = `<p>Response status: ${response.status}</p>`;
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    results.innerHTML += `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+                } else {
+                    const errorText = await response.text();
+                    results.innerHTML += `<p>Error: ${errorText}</p>`;
+                }
+                
+            } catch (error) {
+                results.innerHTML = `<p style="color: red;">Network Error: ${error.message}</p>
+                <p>This suggests you're running the static server (port 8000) without the Flask backend.</p>
+                <p>To fix this, run: <code>python3 app.py</code> or <code>bash start_server.sh</code></p>`;
+            }
+        });
+    </script>
+</body>
+</html>
