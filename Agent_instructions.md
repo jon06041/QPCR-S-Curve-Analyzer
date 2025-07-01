@@ -362,55 +362,36 @@ From analysis, the JavaScript expects these CSS classes:
 
 ## Chart.js Logarithmic/Linear Toggle Feature
 
-### Current Implementation Status 🔄
+### Current Implementation Status ✅ COMPLETED
 
 **Branch**: `feature/logarithmic-curve-toggle`
 
-### Requirements
-1. **UI Toggle Button**: Add toggle button to switch between logarithmic and linear y-axis scales
-2. **Chart.js Integration**: Utilize Chart.js built-in logarithmic scale support
-3. **Threshold Calculation**: Set threshold above 10x the Standard Deviation of amplification values in cycles 1-5, per channel
-4. **User Preference**: Remember user's scale preference during session
+### ✅ Completed Features
+1. **UI Toggle Button**: Added responsive toggle button for linear/log scale switching
+2. **Chart.js Integration**: Implemented logarithmic and linear scale configurations
+3. **Threshold Calculation**: Implemented 10x Standard Deviation threshold calculation for cycles 1-5
+4. **User Preference**: Added sessionStorage for scale preference persistence
+5. **Reusable Configuration**: Created `createChartConfiguration()` function for consistent chart setup
+6. **Dynamic Threshold**: Added `calculateChannelThreshold()` and `updateThresholdAnnotations()` functions
 
-### Chart.js Scale Configuration
-```javascript
-// Linear scale (current)
-scales: {
-    y: {
-        type: 'linear',
-        beginAtZero: true,
-        title: { display: true, text: 'Fluorescence' }
-    }
-}
+### Implementation Details
+- **Toggle UI**: Positioned above chart with visual active state indicator
+- **Scale Switching**: Dynamic y-axis type change between 'linear' and 'logarithmic'
+- **Threshold Logic**: Baseline (mean) + 10 × Std.Dev of RFU values in cycles 1-5
+- **Chart Updates**: Smooth transitions using Chart.js update with no animation
+- **Mobile Support**: Responsive design for all screen sizes
 
-// Logarithmic scale (to implement)
-scales: {
-    y: {
-        type: 'logarithmic',
-        min: 0.1,  // Avoid log(0) issues
-        title: { display: true, text: 'Fluorescence (log)' }
-    }
-}
-```
+### Files Modified
+- ✅ `index.html`: Added chart controls section with toggle button
+- ✅ `static/style.css`: Added toggle button styling and chart controls layout
+- ✅ `static/script.js`: 
+  - Added scale toggle functionality
+  - Implemented threshold calculation
+  - Created reusable chart configuration system
+  - Updated existing chart creation functions
 
-### Implementation Plan
-1. **Add Toggle UI**: Insert log/linear toggle button near chart display
-2. **Update Chart Configuration**: Modify `createChartConfiguration()` to accept scale type parameter
-3. **Implement Scale Switching**: Add function to update chart scale dynamically
-4. **Threshold Calculation**: 
-   - Calculate Std.Dev of cycles 1-5 per channel
-   - Set threshold = 10 × Std.Dev above baseline
-   - Display threshold line on chart
-5. **User Preference Storage**: Store scale preference in sessionStorage
-
-### Files to Modify
-- `static/script.js`: Chart configuration and toggle logic
-- `static/style.css`: Toggle button styling
-- `index.html`: Toggle button placement (if needed)
-
-### Testing Requirements
-- Toggle functionality works for both single and multi-channel displays
-- Logarithmic scale properly handles zero/negative values
-- Threshold lines display correctly on both scales
-- User preference persists during session
-- Mobile-responsive toggle button
+### Testing Status
+- ✅ Backend running on port 5002
+- ✅ Frontend loads with toggle button visible
+- ✅ Scale toggle functionality implemented
+- 🔄 **NEXT**: Manual testing of toggle functionality and threshold calculations
