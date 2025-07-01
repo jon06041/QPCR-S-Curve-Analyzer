@@ -8275,7 +8275,7 @@ function calculateChannelThreshold(cycles, rfu) {
     // Extract RFU values for cycles 1-5
     const earlyRfuValues = [];
     for (let i = 0; i < Math.min(5, cycles.length); i++) {
-        if (cycles[i] <= 5 && rfu[i] !== null && rfu[i] !== undefined) {
+        if (cycles[i] <= 5 && rfu[i] !== null && rfu[i] !== undefined && rfu[i] > 0) {
             earlyRfuValues.push(rfu[i]);
         }
     }
@@ -8291,7 +8291,17 @@ function calculateChannelThreshold(cycles, rfu) {
     const stdDev = Math.sqrt(variance);
     
     // Threshold = baseline + 10 * standard deviation
-    const threshold = mean + (10 * stdDev);
+    let threshold = mean + (10 * stdDev);
+    
+    // Ensure threshold is meaningful for qPCR data
+    // If threshold is too low, set it to a minimum detectable level
+    const minThreshold = Math.max(mean * 1.5, 1.0); // At least 50% above baseline or 1.0 RFU
+    threshold = Math.max(threshold, minThreshold);
+    
+    // For log scale compatibility, ensure threshold is well above noise floor
+    if (currentChartScale === 'logarithmic') {
+        threshold = Math.max(threshold, mean * 2); // At least 2x baseline for log visibility
+    }
     
     console.log(`Threshold calculation - Mean: ${mean.toFixed(3)}, StdDev: ${stdDev.toFixed(3)}, Threshold: ${threshold.toFixed(3)}`);
     
@@ -8299,7 +8309,8 @@ function calculateChannelThreshold(cycles, rfu) {
         threshold: threshold,
         baseline: mean,
         stdDev: stdDev,
-        earlyRfuValues: earlyRfuValues
+        earlyRfuValues: earlyRfuValues,
+        minThreshold: minThreshold
     };
 }
 
@@ -8357,46 +8368,110 @@ function updateThresholdAnnotations() {
 function updateChartWithThreshold(threshold, fluorophore) {
     if (!window.amplificationChart) return;
     
+    // Ensure threshold is visible on current scale
+    let adjustedThreshold = threshold;
+    if (currentChartScale === 'logarithmic') {
+        adjustedThreshold = Math.max(threshold, 0.1);
+    }
+    
     const annotation = {
         annotations: {
             thresholdLine: {
                 type: 'line',
-                yMin: threshold,
-                yMax: threshold,
-                borderColor: 'red',
+                yMin: adjustedThreshold,
+                yMax: adjustedThreshold,
+                borderColor: 'rgba(255, 0, 0, 0.8)',
                 borderWidth: 2,
-                borderDash: [5, 5],
+                borderDash: [8, 4],
                 label: {
-                    content: `Threshold: ${threshold.toFixed(2)}`,
+                    content: currentChartScale === 'logarithmic' ? 
+                        `Threshold: ${adjustedThreshold.toFixed(1)}` : 
+                        `Threshold: ${adjustedThreshold.toFixed(2)}`,
                     enabled: true,
-                    position: 'end',
-                    backgroundColor: 'rgba(255, 0, 0, 0.8)',
+                    position: 'start',
+                    backgroundColor: 'rgba(255, 0, 0, 0.9)',
                     color: 'white',
-                    font: { weight: 'bold' }
+                    font: { weight: 'bold', size: 11 },
+                    padding: 4,
+                    borderColor: 'rgba(255, 0, 0, 0.8)',
+                    borderWidth: 1,
+                    cornerRadius: 4
                 }
             }
         }
     };
     
+    // Add baseline reference line for better context
+    if (currentAnalysisResults && currentAnalysisResults.individual_results) {
+        const wellKey = Object.keys(currentAnalysisResults.individual_results)[0];
+        if (wellKey) {
+            const wellData = currentAnalysisResults.individual_results[wellKey];
+            const thresholdData = calculateThresholdForWell(wellData);
+            
+            if (thresholdData && thresholdData.baseline) {
+                let adjustedBaseline = thresholdData.baseline;
+                if (currentChartScale === 'logarithmic') {
+                    adjustedBaseline = Math.max(thresholdData.baseline, 0.1);
+                }
+                
+                annotation.annotations.baselineLine = {
+                    type: 'line',
+                    yMin: adjustedBaseline,
+                    yMax: adjustedBaseline,
+                    borderColor: 'rgba(0, 150, 0, 0.6)',
+                    borderWidth: 1,
+                    borderDash: [4, 4],
+                    label: {
+                        content: `Baseline: ${adjustedBaseline.toFixed(2)}`,
+                        enabled: true,
+                        position: 'end',
+                        backgroundColor: 'rgba(0, 150, 0, 0.8)',
+                        color: 'white',
+                        font: { size: 10 },
+                        padding: 3
+                    }
+                };
+            }
+        }
+    }
+    
     // Update chart options with new annotation
     window.amplificationChart.options.plugins.annotation = annotation;
     window.amplificationChart.update('none');
+    
+    console.log(`Threshold line updated: ${adjustedThreshold.toFixed(3)} (scale: ${currentChartScale})`);
 }
 
 // --- Chart Scale Toggle Functionality ---
 let currentChartScale = 'linear'; // Default to linear scale
+let currentLogMin = 0.1; // Default log minimum
+let currentLogMax = 'auto'; // Default log maximum
 
 function initializeChartToggle() {
     const toggleBtn = document.getElementById('scaleToggle');
+    const scaleRangeContainer = document.getElementById('scaleRangeContainer');
+    const scalePresetsContainer = document.getElementById('scalePresetsContainer');
+    const scaleRangeSlider = document.getElementById('scaleRangeSlider');
+    const scaleMinValue = document.getElementById('scaleMinValue');
+    
     if (!toggleBtn) return;
     
     // Initialize from sessionStorage if available
     const savedScale = sessionStorage.getItem('qpcr_chart_scale');
+    const savedLogMin = sessionStorage.getItem('qpcr_log_min');
+    
     if (savedScale && (savedScale === 'linear' || savedScale === 'logarithmic')) {
         currentChartScale = savedScale;
         updateToggleAppearance(currentChartScale);
     }
     
+    if (savedLogMin) {
+        currentLogMin = parseFloat(savedLogMin);
+        if (scaleRangeSlider) scaleRangeSlider.value = currentLogMin;
+        if (scaleMinValue) scaleMinValue.textContent = currentLogMin;
+    }
+    
+    // Toggle button event listener
     toggleBtn.addEventListener('click', function() {
         // Toggle between linear and logarithmic
         currentChartScale = currentChartScale === 'linear' ? 'logarithmic' : 'linear';
@@ -8407,9 +8482,66 @@ function initializeChartToggle() {
         // Update toggle appearance
         updateToggleAppearance(currentChartScale);
         
+        // Show/hide scale controls
+        if (currentChartScale === 'logarithmic') {
+            if (scaleRangeContainer) scaleRangeContainer.style.display = 'flex';
+            if (scalePresetsContainer) scalePresetsContainer.style.display = 'flex';
+        } else {
+            if (scaleRangeContainer) scaleRangeContainer.style.display = 'none';
+            if (scalePresetsContainer) scalePresetsContainer.style.display = 'none';
+        }
+        
         // Update chart if it exists
         updateChartScale();
+        
+        // Recalculate and update thresholds for new scale
+        setTimeout(() => {
+            updateThresholdAnnotations();
+        }, 100);
     });
+    
+    // Slider event listener
+    if (scaleRangeSlider) {
+        scaleRangeSlider.addEventListener('input', function() {
+            currentLogMin = parseFloat(this.value);
+            sessionStorage.setItem('qpcr_log_min', currentLogMin);
+            if (scaleMinValue) scaleMinValue.textContent = currentLogMin;
+            
+            // Update chart in real-time
+            if (currentChartScale === 'logarithmic') {
+                updateChartScale();
+            }
+        });
+    }
+    
+    // Preset buttons event listeners
+    const presetButtons = document.querySelectorAll('.preset-btn');
+    presetButtons.forEach(btn => {
+        btn.addEventListener('click', function() {
+            const minValue = parseFloat(this.getAttribute('data-min'));
+            currentLogMin = minValue;
+            
+            // Update UI
+            if (scaleRangeSlider) scaleRangeSlider.value = minValue;
+            if (scaleMinValue) scaleMinValue.textContent = minValue;
+            
+            // Update active preset
+            presetButtons.forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            
+            // Save and update chart
+            sessionStorage.setItem('qpcr_log_min', currentLogMin);
+            if (currentChartScale === 'logarithmic') {
+                updateChartScale();
+            }
+        });
+    });
+    
+    // Initialize visibility based on current scale
+    if (currentChartScale === 'logarithmic') {
+        if (scaleRangeContainer) scaleRangeContainer.style.display = 'flex';
+        if (scalePresetsContainer) scalePresetsContainer.style.display = 'flex';
+    }
 }
 
 function updateToggleAppearance(scale) {
@@ -8433,37 +8565,53 @@ function updateToggleAppearance(scale) {
 function updateChartScale() {
     if (!window.amplificationChart) return;
     
-    const yScale = window.amplificationChart.options.scales.y;
+    // Store current annotation data before updating
+    const currentAnnotations = window.amplificationChart.options.plugins.annotation?.annotations || {};
     
+    // Get new scale configuration
+    const newScaleConfig = getScaleConfiguration();
+    
+    // Update the y-axis configuration
+    window.amplificationChart.options.scales.y = newScaleConfig;
+    
+    // For logarithmic scale, ensure all data points are visible
     if (currentChartScale === 'logarithmic') {
-        yScale.type = 'logarithmic';
-        yScale.min = 0.1; // Avoid log(0) issues
-        yScale.title.text = 'RFU (log scale)';
-        delete yScale.max; // Let Chart.js handle max for log scale
-        delete yScale.beginAtZero;
-    } else {
-        yScale.type = 'linear';
-        yScale.title.text = 'RFU (Relative Fluorescence Units)';
-        delete yScale.min; // Reset to let Chart.js calculate
-        delete yScale.max;
-        yScale.beginAtZero = false;
+        // Process datasets to handle zero or negative values
+        window.amplificationChart.data.datasets.forEach(dataset => {
+            if (dataset.data) {
+                dataset.data = dataset.data.map(point => ({
+                    x: point.x,
+                    y: Math.max(point.y, currentLogMin) // Use slider minimum value
+                }));
+            }
+        });
         
-        // Restore dynamic min/max for linear scale
-        yScale.min = function(context) {
-            const data = context.chart.data.datasets[0].data;
-            if (!data || data.length === 0) return 0;
-            const minVal = Math.min(...data.map(point => point.y));
-            return minVal - (minVal * 0.15);
-        };
-        yScale.max = function(context) {
-            const data = context.chart.data.datasets[0].data;
-            if (!data || data.length === 0) return 100;
-            const maxVal = Math.max(...data.map(point => point.y));
-            return maxVal + (maxVal * 0.15);
-        };
+        // Adjust threshold annotations for log scale visibility
+        Object.keys(currentAnnotations).forEach(key => {
+            if (currentAnnotations[key].type === 'line' && currentAnnotations[key].yMin !== undefined) {
+                const thresholdValue = currentAnnotations[key].yMin;
+                // Ensure threshold is visible on log scale but above minimum
+                const adjustedThreshold = Math.max(thresholdValue, currentLogMin * 2);
+                currentAnnotations[key].yMin = adjustedThreshold;
+                currentAnnotations[key].yMax = adjustedThreshold;
+                
+                // Update label to show adjusted value
+                if (currentAnnotations[key].label) {
+                    currentAnnotations[key].label.content = `Threshold: ${adjustedThreshold.toFixed(2)}`;
+                }
+            }
+        });
     }
     
-    window.amplificationChart.update('none'); // No animation for smoother transition
+    // Restore annotations
+    if (Object.keys(currentAnnotations).length > 0) {
+        window.amplificationChart.options.plugins.annotation = { annotations: currentAnnotations };
+    }
+    
+    // Update chart with animation disabled for smooth transition
+    window.amplificationChart.update('none');
+    
+    console.log(`Chart scale updated to: ${currentChartScale}, min: ${currentLogMin}`);
 }
 
 function createChartConfiguration(chartType, datasets, title, annotation = null) {
@@ -8532,10 +8680,22 @@ function getScaleConfiguration() {
         return {
             ...baseConfig,
             type: 'logarithmic',
-            min: 0.1,
+            min: currentLogMin, // Use slider value
             title: { 
                 ...baseConfig.title,
-                text: 'RFU (log scale)'
+                text: `RFU (log scale, min: ${currentLogMin})`
+            },
+            ticks: {
+                callback: function(value, index, values) {
+                    // Custom tick formatting for better readability
+                    if (value >= 1000) {
+                        return (value / 1000).toFixed(0) + 'k';
+                    } else if (value >= 1) {
+                        return value.toFixed(0);
+                    } else {
+                        return value.toFixed(1);
+                    }
+                }
             }
         };
     } else {
