@@ -8,6 +8,13 @@ function showPathogenGridsWithData(testCode, controlSets) {
     console.log('🔍 PATHOGEN GRID - controlSets:', controlSets);
     console.log('🔍 PATHOGEN GRID - window.currentAnalysisResults available:', !!window.currentAnalysisResults);
     console.log('🔍 PATHOGEN GRID - currentAnalysisResults type:', typeof window.currentAnalysisResults);
+    console.log('🔍 PATHOGEN GRID - currentSessionFilename:', window.currentSessionFilename);
+    console.log('🔍 PATHOGEN GRID - currentFilePattern:', window.currentFilePattern);
+    
+    // Enhanced debugging: Check if testCode is supported
+    const supportedTestCodes = ['BVAB', 'BVPanelPCR3', 'Cglab', 'Ngon', 'Calb', 'Ctrach', 'Tvag', 'Mgen'];
+    const isSupported = supportedTestCodes.includes(testCode);
+    console.log('🔍 PATHOGEN GRID - Test code supported:', isSupported, 'Supported codes:', supportedTestCodes);
     
     const container = document.getElementById('pathogenControlGrids');
     if (!container) {
@@ -46,6 +53,18 @@ function showPathogenGridsWithData(testCode, controlSets) {
         createTabbedPathogenGrids(container, 'Cglab', controlValidationData);
     } else if (testCode === 'Ngon') {
         createTabbedPathogenGrids(container, 'Ngon', controlValidationData);
+    } else if (testCode === 'Calb') {
+        createTabbedPathogenGrids(container, 'Calb', controlValidationData);
+    } else if (testCode === 'Ctrach') {
+        createTabbedPathogenGrids(container, 'Ctrach', controlValidationData);
+    } else if (testCode === 'Tvag') {
+        createTabbedPathogenGrids(container, 'Tvag', controlValidationData);
+    } else if (testCode === 'Mgen') {
+        createTabbedPathogenGrids(container, 'Mgen', controlValidationData);
+    } else if (testCode === 'Upar') {
+        createTabbedPathogenGrids(container, 'Upar', controlValidationData);
+    } else if (testCode === 'Uure') {
+        createTabbedPathogenGrids(container, 'Uure', controlValidationData);
     } else {
         // Fallback: Use universal control grid for unsupported test codes
         console.warn('No specific grid available for testCode:', testCode, '- using universal fallback');
@@ -68,6 +87,8 @@ function showPathogenGridsWithData(testCode, controlSets) {
 function getRealControlValidationData() {
     console.log('🔍 CONTROL GRID DATA - Starting real control validation data extraction');
     console.log('🔍 CONTROL GRID DATA - Current analysis results available:', !!window.currentAnalysisResults);
+    console.log('🔍 CONTROL GRID DATA - currentSessionFilename:', window.currentSessionFilename);
+    console.log('🔍 CONTROL GRID DATA - currentFilePattern:', window.currentFilePattern);
     
     // Extract testCode from current session or filename pattern
     let testCode = 'BVAB'; // Default fallback
@@ -77,15 +98,27 @@ function getRealControlValidationData() {
         else if (window.currentSessionFilename.includes('BVPanelPCR3')) testCode = 'BVPanelPCR3';
         else if (window.currentSessionFilename.includes('Ngon')) testCode = 'Ngon';
         else if (window.currentSessionFilename.includes('Cglab')) testCode = 'Cglab';
+        else if (window.currentSessionFilename.includes('Calb')) testCode = 'Calb';
+        else if (window.currentSessionFilename.includes('Ctrach')) testCode = 'Ctrach';
+        else if (window.currentSessionFilename.includes('Tvag')) testCode = 'Tvag';
+        else if (window.currentSessionFilename.includes('Mgen')) testCode = 'Mgen';
+        // Add more test code detection as needed
+        console.log('🔍 CONTROL GRID DATA - Test code detected from session filename:', testCode);
     } else if (window.currentFilePattern) {
         // Extract from file pattern for fresh uploads
         if (window.currentFilePattern.includes('BVAB')) testCode = 'BVAB';
         else if (window.currentFilePattern.includes('BVPanelPCR3')) testCode = 'BVPanelPCR3';
         else if (window.currentFilePattern.includes('Ngon')) testCode = 'Ngon';
         else if (window.currentFilePattern.includes('Cglab')) testCode = 'Cglab';
+        else if (window.currentFilePattern.includes('Calb')) testCode = 'Calb';
+        else if (window.currentFilePattern.includes('Ctrach')) testCode = 'Ctrach';
+        else if (window.currentFilePattern.includes('Tvag')) testCode = 'Tvag';
+        else if (window.currentFilePattern.includes('Mgen')) testCode = 'Mgen';
+        // Add more test code detection as needed
+        console.log('🔍 CONTROL GRID DATA - Test code detected from file pattern:', testCode);
     }
     
-    console.log('🔍 CONTROL GRID DATA - Detected test code:', testCode);
+    console.log('🔍 CONTROL GRID DATA - Final detected test code:', testCode);
     // Support both array and object for window.currentAnalysisResults
     let wellsArray = [];
     if (Array.isArray(window.currentAnalysisResults)) {
@@ -438,6 +471,30 @@ function createTabbedPathogenGrids(container, testCode, controlData) {
         allPathogens = [
             { name: 'Neisseria gonhorrea', fluorophore: 'HEX' }
         ];
+    } else if (testCode === 'Calb') {
+        allPathogens = [
+            { name: 'Candida albicans', fluorophore: 'HEX' }
+        ];
+    } else if (testCode === 'Ctrach') {
+        allPathogens = [
+            { name: 'Chlamydia trachomatis', fluorophore: 'FAM' }
+        ];
+    } else if (testCode === 'Tvag') {
+        allPathogens = [
+            { name: 'Trichomonas vaginalis', fluorophore: 'FAM' }
+        ];
+    } else if (testCode === 'Mgen') {
+        allPathogens = [
+            { name: 'Mycoplasma genitalium', fluorophore: 'FAM' }
+        ];
+    } else if (testCode === 'Upar') {
+        allPathogens = [
+            { name: 'Ureaplasma parvum', fluorophore: 'FAM' }
+        ];
+    } else if (testCode === 'Uure') {
+        allPathogens = [
+            { name: 'Ureaplasma urealyticum', fluorophore: 'FAM' }
+        ];
     }
     
     // Filter pathogens to only include those with actual control data
@@ -577,7 +634,7 @@ function createSinglePathogenControlGrid(pathogen, controlData) {
             if (controlInfo) {
                 cellClass = controlInfo.isValid ? 'valid' : 'invalid';
                 symbol = controlInfo.isValid ? '✓' : '✗';
-                coordinate = controlInfo.coordinate;
+                coordinate = controlInfo.isValid ? controlInfo.coordinate : 'N/A';
                 tooltip = `${controlType} Set ${setNum} (${coordinate}): Expected ${controlInfo.expected}, Got ${controlInfo.actual} (Amplitude: ${controlInfo.amplitude.toFixed(1)})`;
             } else {
                 // Check if this set exists for this fluorophore
@@ -780,7 +837,7 @@ function createSinglePathogenControlGridFromFallback(pathogen, fallbackSets) {
             if (control) {
                 cellClass = control.isValid ? 'valid' : 'invalid';
                 symbol = control.isValid ? '✓' : '✗';
-                coordinate = control.coordinate;
+                coordinate = control.isValid ? control.coordinate : 'N/A';
                 const amplitude = control.amplitude ? control.amplitude.toFixed(1) : 'N/A';
                 tooltip = `${controlType} Set ${setNum} (${coordinate}): Amplitude ${amplitude}`;
             }
