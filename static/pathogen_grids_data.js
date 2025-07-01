@@ -747,42 +747,58 @@ function createSinglePathogenControlGridFromFallback(pathogen, fallbackSets) {
         return gridHTML + '<p>No control data available</p>';
     }
     
-    gridHTML += '<div class="pathogen-control-grid">';
+    // Use the same grid structure as the primary system
+    const controlTypes = ['H', 'M', 'L', 'NTC'];
+    const setNumbers = Object.keys(fallbackSets).sort();
     
-    Object.keys(fallbackSets).sort().forEach(setNumber => {
-        const controlSet = fallbackSets[setNumber];
-        gridHTML += `<div class="control-set">`;
-        gridHTML += `<h5>Set ${setNumber}</h5>`;
+    gridHTML += `
+        <div class="single-pathogen-grid">
+            <div class="control-grid-table" data-sets="${setNumbers.length}">
+                <div class="grid-header">
+                    <div class="grid-corner">Control</div>
+    `;
+    
+    // Dynamic set headers based on actual data
+    setNumbers.forEach(setNum => {
+        gridHTML += `<div class="set-header">Set ${setNum}</div>`;
+    });
+    gridHTML += `</div>`;
+    
+    controlTypes.forEach(controlType => {
+        const ntcClass = controlType === 'NTC' ? ' ntc-row' : '';
+        gridHTML += `<div class="control-row${ntcClass}">`;
+        gridHTML += `<div class="control-type-label">${controlType}</div>`;
         
-        // Expected control types for validation grids
-        const expectedControls = ['H', 'M', 'L', 'NTC'];
-        expectedControls.forEach(controlType => {
-            const control = controlSet[controlType];
+        setNumbers.forEach(setNum => {
+            const control = fallbackSets[setNum] && fallbackSets[setNum][controlType];
+            
+            let cellClass = 'pending';
+            let symbol = '-';
+            let coordinate = '?';
+            let tooltip = `${controlType} Set ${setNum}: No data available`;
+            
             if (control) {
-                const statusClass = control.isValid ? 'valid' : 'invalid';
-                const amplitude = control.amplitude ? control.amplitude.toFixed(0) : 'N/A';
-                gridHTML += `
-                    <div class="control-well ${statusClass}">
-                        <div class="control-type">${controlType}</div>
-                        <div class="control-coordinate">${control.coordinate}</div>
-                        <div class="control-amplitude">${amplitude}</div>
-                    </div>
-                `;
-            } else {
-                gridHTML += `
-                    <div class="control-well missing">
-                        <div class="control-type">${controlType}</div>
-                        <div class="control-coordinate">-</div>
-                        <div class="control-amplitude">Missing</div>
-                    </div>
-                `;
+                cellClass = control.isValid ? 'valid' : 'invalid';
+                symbol = control.isValid ? '✓' : '✗';
+                coordinate = control.coordinate;
+                const amplitude = control.amplitude ? control.amplitude.toFixed(1) : 'N/A';
+                tooltip = `${controlType} Set ${setNum} (${coordinate}): Amplitude ${amplitude}`;
             }
+            
+            gridHTML += `<div class="control-cell ${cellClass}" title="${tooltip}">
+                <span class="control-symbol">${symbol}</span>
+                <span class="control-coordinate">${coordinate}</span>
+            </div>`;
         });
         
         gridHTML += '</div>';
     });
     
-    gridHTML += '</div>';
+    gridHTML += `
+            </div>
+        </div>
+    `;
+    
     return gridHTML;
 }
 

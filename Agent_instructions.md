@@ -5,28 +5,46 @@ This document provides comprehensive instructions and findings from debugging an
 
 ## CURRENT STATUS (July 1, 2025)
 ✅ **Multi-fluorophore processing**: COMPLETED - Sequential processing, error handling, threshold preservation
-✅ **Control Grid CSS**: COMPLETED - Removed duplicate CSS sections, unified styling
+✅ **Control Grid CSS**: COMPLETED - Fixed both duplicate CSS and grid layout structure
+✅ **Tabbed Grid Layout**: COMPLETED - Grid layout within tabs now works correctly
 
 ## Control Grid CSS Issue - RESOLVED
 
-### Problem Solved
+### Root Cause Identified and Fixed
+The control grids for multichannel runs involve **tabbed interface** (one tab per fluorophore/pathogen), and the issue was **two different grid systems** being used inconsistently:
+
+1. **Primary System** (`.control-grid-table`): Proper CSS Grid with Set 1,2,3,4 as columns and H,M,L,NTC as rows
+2. **Fallback System** (`.pathogen-control-grid`): Vertical stacked layout where each set was a separate section
+
+**Expected Layout:** ✅ NOW WORKING
+```
+| Control | Set 1 | Set 2 | Set 3 | Set 4 |
+|---------|-------|-------|-------|-------|
+|    H    |  H1   |  H2   |  H3   |  H4   |
+|    M    |  M1   |  M2   |  M3   |  M4   |
+|    L    |  L1   |  L2   |  L3   |  L4   |
+|   NTC   | NTC1  | NTC2  | NTC3  | NTC4  |
+```
+
+### Solution Implemented
+✅ **Fixed Fallback Grid Function**: Updated `createSinglePathogenControlGridFromFallback()` to use same `.control-grid-table` structure as primary system
+✅ **Unified Grid Structure**: Both systems now generate identical HTML structure
+✅ **Proper CSS Grid**: Single CSS system handles all grid displays with correct column/row layout
+
+### Previous Problem Also Solved
 Successfully identified and removed **two duplicate CSS sections** for control grids:
 
 1. ✅ **Removed Section 1 (Lines 1112-1140)**: Duplicate `.pathogen-control-grid` with flexbox layout
 2. ✅ **Removed Duplicate h5 styling (Line 1958)**: Redundant `.pathogen-control-grid h5` rules
 3. ✅ **Kept Section 2 (Lines 2651+)**: Unified CSS Grid layout with proper structure
 
-### Solution Implemented
-- **Unified CSS**: Single `.pathogen-control-grid` section with complete styling
-- **Proper Structure**: CSS Grid layout matching JavaScript expectations
-- **All States Covered**: Valid, invalid, missing control cell states
-- **Responsive Design**: Includes mobile-friendly media queries
-
 ### Testing Required
 - ✅ Control grid display consistency
 - ✅ Fresh upload vs history load behavior  
-- ✅ Multi-fluorophore tabbed interface
-- ✅ Control validation status indicators
+- ✅ Multi-fluorophore tabbed interface displays correctly
+- ✅ Control validation status indicators work
+- ✅ Grid layout shows Set 1,2,3,4 as columns; H,M,L,NTC as rows
+- ✅ All fluorophore tabs display proper grid layout
 
 ## Key Issues Identified and Resolved
 
