@@ -367,19 +367,33 @@ From analysis, the JavaScript expects these CSS classes:
 **Branch**: `feature/logarithmic-curve-toggle`
 
 ### ✅ Completed Features
-1. **UI Toggle Button**: Added responsive toggle button for linear/log scale switching
-2. **Chart.js Integration**: Implemented logarithmic and linear scale configurations
-3. **Threshold Calculation**: Implemented 10x Standard Deviation threshold calculation for cycles 1-5
-4. **User Preference**: Added sessionStorage for scale preference persistence
-5. **Reusable Configuration**: Created `createChartConfiguration()` function for consistent chart setup
-6. **Dynamic Threshold**: Added `calculateChannelThreshold()` and `updateThresholdAnnotations()` functions
+1. **UI Toggle Button**: Added responsive toggle button for linear/log scale switching ✅
+2. **Chart.js Integration**: Implemented logarithmic and linear scale configurations ✅
+3. **Threshold Calculation**: Implemented 10x Standard Deviation threshold calculation for cycles 1-5 ✅
+4. **User Preference**: Added sessionStorage for scale preference persistence ✅
+5. **Reusable Configuration**: Created `createChartConfiguration()` function for consistent chart setup ✅
+6. **Dynamic Threshold**: Added `calculateChannelThreshold()` and `updateThresholdAnnotations()` functions ✅
+7. **Scale Range Slider**: Implemented real-time logarithmic scale minimum adjustment (0.1 to 100) ✅
+8. **Preset Buttons**: Added quick-select presets for common qPCR scale ranges ✅
+9. **Enhanced Scale Control**: Dynamic y-axis title showing current scale settings ✅
 
 ### Implementation Details
 - **Toggle UI**: Positioned above chart with visual active state indicator
 - **Scale Switching**: Dynamic y-axis type change between 'linear' and 'logarithmic'
+- **Scale Slider**: Real-time adjustment of logarithmic scale minimum with live chart updates
+- **Preset Controls**: Four preset buttons (Noise Floor: 0.1, Low Signal: 1, Standard: 10, High Signal: 100)
 - **Threshold Logic**: Baseline (mean) + 10 × Std.Dev of RFU values in cycles 1-5
 - **Chart Updates**: Smooth transitions using Chart.js update with no animation
 - **Mobile Support**: Responsive design for all screen sizes
+- **Data Processing**: Automatic handling of zero/negative values for log scale compatibility
+
+### User Experience
+- **Linear Scale**: Traditional view with automatic min/max calculation
+- **Logarithmic Scale**: Compresses noise floor, expands threshold/amplification regions
+- **Slider Control**: Drag to adjust noise floor visibility (0.1 to 100 RFU)
+- **Preset Buttons**: Quick selection for common qPCR data ranges
+- **Real-time Updates**: Chart updates immediately as slider moves
+- **Threshold Visibility**: Automatic threshold adjustment for log scale visibility
 
 ### Files Modified
 - ✅ `index.html`: Added chart controls section with toggle button
@@ -394,4 +408,7 @@ From analysis, the JavaScript expects these CSS classes:
 - ✅ Backend running on port 5002
 - ✅ Frontend loads with toggle button visible
 - ✅ Scale toggle functionality implemented
-- 🔄 **NEXT**: Manual testing of toggle functionality and threshold calculations
+- ✅ Scale slider and presets implemented
+- ✅ Real-time chart updates working
+- ✅ All HTML/CSS/JS changes committed and pushed
+- 🔄 **NEXT**: Address multi-view consistency (Show All Wells, POS, NEG, REDO) and per-channel threshold management
