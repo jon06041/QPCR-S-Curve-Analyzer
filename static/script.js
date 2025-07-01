@@ -35,25 +35,19 @@ async function processChannelsSequentially(fluorophores, experimentPattern) {
                 // Mark channel as completed
                 updateChannelStatus(fluorophore, 'completed');
                 
+                // Skip backend completion waiting since polling removed
                 console.log(`✅ SEQUENTIAL-PROCESSING - Channel ${fluorophore} completed successfully. Wells: ${Object.keys(channelResult.individual_results).length}`);
-                
-                // Wait for backend to confirm completion
-                await waitForChannelProcessingCompletion(experimentPattern, [fluorophore]);
                 
             } else {
                 throw new Error(`Channel ${fluorophore} returned empty results`);
             }
             
         } catch (error) {
+            // Mark channel as failed
             console.error(`❌ SEQUENTIAL-PROCESSING - Channel ${fluorophore} failed:`, error);
             updateChannelStatus(fluorophore, 'failed');
             
-            // Mark channel as failed in backend
-            try {
-                await markChannelFailed(experimentPattern, fluorophore, error.message);
-            } catch (markError) {
-                console.error('Failed to mark channel as failed:', markError);
-            }
+            // Skip backend failure marking since polling removed
             
             // Continue with other channels
             allResults[fluorophore] = null;
@@ -76,8 +70,8 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
     console.log(`🔍 SINGLE-CHANNEL - Analyzing ${fluorophore} channel`);
     
     try {
-        // Mark channel as started in backend
-        await markChannelStarted(experimentPattern, fluorophore);
+        // Skip backend channel marking since polling removed
+        console.log(`🔍 SINGLE-CHANNEL - Analyzing ${fluorophore} channel`);
         
         // Prepare data for backend analysis
         const analysisData = prepareAnalysisData(data);
@@ -271,52 +265,19 @@ function hideChannelProcessingStatus() {
 }
 
 /**
- * Poll channel processing status from backend
+ * Poll channel processing status from backend - DISABLED (polling removed)
  */
 async function pollChannelProcessingStatus(experimentPattern, fluorophores) {
-    try {
-        const response = await fetch(`/channels/processing-status/${experimentPattern}`);
-        if (response.ok) {
-            const statusData = await response.json();
-            console.log('🔍 POLLING - Channel status:', statusData);
-            return statusData;
-        }
-    } catch (error) {
-        console.error('Error polling channel status:', error);
-    }
-    return null;
+    console.log('🔍 POLLING - Disabled (polling endpoints removed)');
+    return null; // Always return null since polling is disabled
 }
 
 /**
- * Wait for channel processing completion with backend verification
+ * Wait for channel processing completion - DISABLED (polling removed)
  */
 async function waitForChannelProcessingCompletion(experimentPattern, fluorophores) {
-    console.log(`🔍 COMPLETION-WAIT - Waiting for ${fluorophores.length} channels to complete`);
-    
-    const maxAttempts = 30; // 30 seconds max wait
-    const pollInterval = 1000; // 1 second
-    
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        const statusData = await pollChannelProcessingStatus(experimentPattern, fluorophores);
-        
-        if (statusData && statusData.channels) {
-            const allComplete = fluorophores.every(fluorophore => {
-                const channelStatus = statusData.channels[fluorophore];
-                return channelStatus && (channelStatus.status === 'completed' || channelStatus.status === 'failed');
-            });
-            
-            if (allComplete) {
-                console.log('✅ COMPLETION-WAIT - All channels completed');
-                return true;
-            }
-        }
-        
-        // Wait before next poll
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
-    }
-    
-    console.warn('⚠️ COMPLETION-WAIT - Timeout waiting for channels to complete');
-    return false;
+    console.log(`🔍 COMPLETION-WAIT - Disabled (polling removed), skipping wait for ${fluorophores.length} channels`);
+    return true; // Always return true since we're not polling
 }
 
 /**

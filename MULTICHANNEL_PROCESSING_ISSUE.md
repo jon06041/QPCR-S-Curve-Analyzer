@@ -229,6 +229,18 @@ Instead of replacing existing functions, we **enhanced the system**:
    - ✅ Removed unnecessary channel completion tracking
    - ✅ Cleaned up ChannelCompletionStatus polling endpoints
    - ✅ Simplified backend to focus on core functionality
+   - ✅ **Key Insight**: Original control extraction system (`extractRealControlCoordinates`) works properly with new well object structure
+
+#### Key Discovery
+The original control extraction functions were never broken:
+- ✅ `extractRealControlCoordinates()` - Works correctly with proper well data
+- ✅ `isControlSample()` - Functions properly for control detection
+- ✅ `createPathogenControlGrids()` - Real grid system (not dummy/fallback)
+
+**The issue was data structure incompatibility, not the control extraction logic.**
+- ❌ **Old Problem**: Fresh loads had incomplete well_id structure (missing fluorophore suffix)
+- ✅ **Phase 2 Fix**: Well objects now have proper structure for both fresh and history loads
+- ✅ **Result**: Original control extraction + fixed well objects = Working solution
 
 #### Code Changes Made
 - Enhanced `/analyze` endpoint to ensure proper well_id structure for fresh loads
