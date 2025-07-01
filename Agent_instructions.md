@@ -556,64 +556,134 @@ function smoothBaseline(rfuValue, baseline) {
 4. **Scale Interaction**: Only available in linear mode, disabled in log mode
 5. **Multi-Channel**: Works correctly for all fluorophore channels
 
-### 🔧 CHANNEL OBJECT STRUCTURE REQUIREMENTS
+### 📋 IMMEDIATE ACTION ITEMS FOR NEXT AGENT
 
-**Current Problem**: Channels being passed as strings instead of objects
-**Required Fix**: Channel information must be passed as objects with proper structure
+#### Priority 1: Fix Threshold Display System
+1. **Verify Chart.js Annotation Plugin**: 
+   ```bash
+   # Check if annotation plugin is loading
+   # Look for console errors in browser dev tools
+   # Verify script.js loads without runtime errors
+   ```
 
-#### Required Channel Object Structure:
+2. **Test Backend Connection**:
+   ```bash
+   # Start Flask backend
+   python3 app.py  # Runs on port 5002
+   
+   # OR use static server for testing
+   python3 -m http.server 8000
+   # Mock backend will activate automatically
+   ```
+
+3. **Debug Threshold Calculations**:
+   ```javascript
+   // Check in browser console after analysis:
+   console.log('Channel Thresholds:', window.stableChannelThresholds);
+   console.log('Current Analysis Results:', currentAnalysisResults);
+   console.log('Chart Available:', !!window.amplificationChart);
+   ```
+
+#### Priority 2: Implement Channel Object Structure
+**Current Problem**: Functions expect channel objects but receive strings
+
+**Required Changes**:
 ```javascript
-// Correct channel structure for threshold system
-const channelObject = {
-    fluorophore: "FAM",           // Channel identifier (string)
-    wells: [well1, well2, ...],   // Array of well objects for this channel
-    thresholds: {
-        linear: 100.5,            // Linear scale threshold (calculated)
-        log: 10.2                 // Log scale threshold (calculated)
-    },
-    baseline: {
-        mean: 85.3,               // Baseline statistics for noise flattening
-        stdDev: 12.1,
-        cycles1to5: [82, 86, 84, 87, 85]
-    }
-};
+// CHANGE FROM:
+['FAM', 'HEX', 'Cy5'].forEach(channel => {
+    calculateChannelThreshold(channel, 'linear');
+});
 
-// Well object structure within channel
-const wellObject = {
-    well_position: "A1",
-    fluorophore: "FAM",           // CRITICAL: Must match channelObject.fluorophore
-    cq_value: 25.3,
-    raw_data: [                   // Array of cycle data points
-        {x: 1, y: 85.2},
-        {x: 2, y: 86.1},
-        // ... up to cycle 40
-    ],
-    sample_name: "Sample_A1",
-    well_id: "A1",
-    is_good_scurve: true,
-    r2_score: 0.985,
-    baseline: 85.0,               // Individual well baseline
-    amplitude: 800.5,             // Individual well amplitude
-    inflection_point: 22.3        // Individual well inflection point
-};
+// CHANGE TO:
+channelObjects.forEach(channelObj => {
+    calculateChannelThreshold(channelObj, 'linear');
+});
 ```
 
-#### Functions That Need Channel Objects:
-1. `calculateChannelThreshold(channelObject, scale)`
-2. `updateMultiChannelThresholds(channelObjects[])`
-3. `updateSingleChannelThreshold(channelObject)`
-4. `applyBaselineFlattening(channelObject, enableFlattening)`
-5. `initializeChannelThresholds(channelObjects[])`
+**Files to Modify**:
+- `processChannelsSequentially()` - return channel objects
+- `initializeChannelThresholds()` - accept channel objects
+- All threshold calculation functions - use channelObj.fluorophore
 
-#### Conversion Required:
+#### Priority 3: Implement CFX Manager Baseline Flattening
+**User Requirement**: "Flatten baseline noise on the linear channel without affecting an s curve"
+
+**Implementation Plan**:
+1. Add toggle button to chart controls (next to linear/log toggle)
+2. Implement baseline detection algorithm (cycles 1-5 analysis)
+3. Add noise flattening mathematical functions
+4. Integrate with existing chart update system
+5. Only activate in linear scale mode
+
+**Code Structure**:
 ```javascript
-// WRONG: Current implementation (strings)
-const channels = ["FAM", "HEX", "Cy5"];
+// Add to chart controls
+function addBaselineFlatteningToggle() {
+    const chartControls = document.querySelector('.chart-controls');
+    const toggle = createBaselineToggle();
+    chartControls.appendChild(toggle);
+}
 
-// CORRECT: Required implementation (objects)
-const channelObjects = [
-    { fluorophore: "FAM", wells: [...], thresholds: {...} },
-    { fluorophore: "HEX", wells: [...], thresholds: {...} },
-    { fluorophore: "Cy5", wells: [...], thresholds: {...} }
-];
+// Implement flattening algorithm
+function applyBaselineFlattening(rawData, enableFlattening) {
+    if (!enableFlattenting) return rawData;
+    // Apply CFX Manager-style noise reduction
+}
 ```
+
+### 🔍 DEBUGGING CHECKLIST
+
+#### When Testing Threshold Display:
+- [ ] Script.js loads without console errors
+- [ ] Chart.js annotation plugin is registered
+- [ ] `initializeChannelThresholds()` finds channels correctly
+- [ ] Threshold values are calculated and stored
+- [ ] Chart annotations are created and applied
+- [ ] Threshold lines appear on chart
+
+#### When Testing Multi-Channel Analysis:
+- [ ] All fluorophore files upload successfully
+- [ ] Sequential processing completes without errors
+- [ ] Channel objects have proper structure
+- [ ] Combined results include all channels
+- [ ] Threshold system works for each channel
+
+#### When Testing New Features:
+- [ ] Baseline flattening toggle appears in linear mode only
+- [ ] Toggle state persists across chart updates
+- [ ] Noise reduction affects cycles 1-5 only
+- [ ] S-curve amplification region unchanged
+- [ ] Real-time updates work correctly
+
+### 💻 COMPUTER SWITCH HANDOFF SUMMARY
+
+**What's Working**:
+✅ Multi-fluorophore sequential processing
+✅ Control grid display system  
+✅ Mock backend for testing without Flask
+✅ Mathematical threshold calculations implemented
+✅ Chart.js integration framework in place
+
+**What Needs Immediate Attention**:
+❌ Threshold lines not appearing on charts
+❌ Channel object structure implementation
+❌ CFX Manager baseline flattening feature
+❌ Full threshold system debugging and testing
+
+**Critical Files**:
+- `static/script.js` - Main frontend logic (threshold system 80% complete)
+- `Agent_instructions.md` - Complete documentation (THIS FILE)
+- `app.py` - Flask backend with qPCR analysis
+- `index.html` - UI structure (needs baseline toggle)
+
+**Testing Approach**:
+1. Start with Flask backend (port 5002) for full functionality
+2. Fall back to static server (port 8000) for UI testing with mock data
+3. Use browser dev tools to debug threshold calculations
+4. Test with real qPCR CSV files for final validation
+
+**Next Session Goals**:
+1. Get threshold lines displaying correctly
+2. Implement proper channel object passing
+3. Add CFX Manager baseline flattening feature
+4. Complete testing and validation of entire system
