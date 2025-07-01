@@ -1,3 +1,405 @@
+// ========================================
+// MULTICHANNEL SEQUENTIAL PROCESSING FUNCTIONS
+// Phase 2: Frontend Sequential Processing with Real-time Status
+// ========================================
+
+/**
+ * Process channels sequentially with completion tracking
+ * Replaces the parallel forEach with proper sequential coordination
+ */
+async function processChannelsSequentially(fluorophores, experimentPattern) {
+    console.log(`🔍 SEQUENTIAL-PROCESSING - Starting sequential processing of ${fluorophores.length} channels`);
+    
+    const allResults = {};
+    const totalChannels = fluorophores.length;
+    
+    for (let i = 0; i < fluorophores.length; i++) {
+        const fluorophore = fluorophores[i];
+        const channelNum = i + 1;
+        
+        console.log(`🔍 SEQUENTIAL-PROCESSING - Processing channel ${channelNum}/${totalChannels}: ${fluorophore}`);
+        
+        try {
+            // Update status to show current channel being processed
+            updateChannelStatus(fluorophore, 'processing');
+            
+            // Get data for this specific fluorophore
+            const data = amplificationFiles[fluorophore].data;
+            
+            // Process this single channel
+            const channelResult = await analyzeSingleChannel(data, fluorophore, experimentPattern);
+            
+            if (channelResult && channelResult.individual_results) {
+                allResults[fluorophore] = channelResult;
+                
+                // Mark channel as completed
+                updateChannelStatus(fluorophore, 'completed');
+                
+                console.log(`✅ SEQUENTIAL-PROCESSING - Channel ${fluorophore} completed successfully. Wells: ${Object.keys(channelResult.individual_results).length}`);
+                
+                // Wait for backend to confirm completion
+                await waitForChannelProcessingCompletion(experimentPattern, [fluorophore]);
+                
+            } else {
+                throw new Error(`Channel ${fluorophore} returned empty results`);
+            }
+            
+        } catch (error) {
+            console.error(`❌ SEQUENTIAL-PROCESSING - Channel ${fluorophore} failed:`, error);
+            updateChannelStatus(fluorophore, 'failed');
+            
+            // Mark channel as failed in backend
+            try {
+                await markChannelFailed(experimentPattern, fluorophore, error.message);
+            } catch (markError) {
+                console.error('Failed to mark channel as failed:', markError);
+            }
+            
+            // Continue with other channels
+            allResults[fluorophore] = null;
+        }
+        
+        // Small delay between channels to prevent overwhelming
+        if (i < fluorophores.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+    }
+    
+    console.log(`🔍 SEQUENTIAL-PROCESSING - All channels processed. Results: ${Object.keys(allResults).filter(k => allResults[k]).length}/${totalChannels}`);
+    return allResults;
+}
+
+/**
+ * Analyze a single channel with proper error handling and backend coordination
+ */
+async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
+    console.log(`🔍 SINGLE-CHANNEL - Analyzing ${fluorophore} channel`);
+    
+    try {
+        // Mark channel as started in backend
+        await markChannelStarted(experimentPattern, fluorophore);
+        
+        // Prepare data for backend analysis
+        const analysisData = prepareAnalysisData(data);
+        
+        // Convert samplesData back to CSV string for backend SQL integration
+        let samplesDataCsv = null;
+        if (samplesData && samplesData.data) {
+            // Convert array of arrays back to CSV string
+            samplesDataCsv = samplesData.data.map(row => row.join(',')).join('\n');
+        }
+        
+        const payload = {
+            analysis_data: analysisData,
+            samples_data: samplesDataCsv
+        };
+        
+        console.log(`🔍 SINGLE-CHANNEL - Sending ${fluorophore} data to backend`, {
+            analysisDataLength: analysisData.length,
+            samplesDataAvailable: !!samplesDataCsv,
+            samplesDataLength: samplesDataCsv ? samplesDataCsv.length : 0,
+            fluorophore: fluorophore
+        });
+        
+        // Perform the actual analysis via backend
+        const response = await fetch('/analyze', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Filename': amplificationFiles[fluorophore]?.fileName || `${fluorophore}.csv`,
+                'X-Fluorophore': fluorophore
+            },
+            body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(`Backend analysis failed: ${errorData.error || 'Unknown error'}`);
+        }
+        
+        const result = await response.json();
+        
+        if (!result || !result.individual_results) {
+            throw new Error(`Analysis returned invalid results for ${fluorophore}`);
+        }
+        
+        console.log(`🔍 SINGLE-CHANNEL - ${fluorophore} analysis complete. Wells: ${Object.keys(result.individual_results).length}`);
+        
+        return result;
+        
+    } catch (error) {
+        console.error(`❌ SINGLE-CHANNEL - Error analyzing ${fluorophore}:`, error);
+        throw error; // Re-throw to be handled by sequential processor
+    }
+}
+
+/**
+ * Display channel processing status UI with real-time updates
+ */
+function displayChannelProcessingStatus(fluorophores, experimentPattern) {
+    console.log('🔍 STATUS-UI - Displaying channel processing status');
+    
+    // Create or update status container
+    let statusContainer = document.getElementById('channel-processing-status');
+    if (!statusContainer) {
+        statusContainer = document.createElement('div');
+        statusContainer.id = 'channel-processing-status';
+        statusContainer.className = 'channel-processing-container';
+        
+        // Insert before results section
+        const resultsSection = document.getElementById('analysisResults');
+        if (resultsSection) {
+            resultsSection.parentNode.insertBefore(statusContainer, resultsSection);
+        } else {
+            document.body.appendChild(statusContainer);
+        }
+    }
+    
+    // Create status HTML
+    const totalChannels = fluorophores.length;
+    let statusHtml = `
+        <div class="channel-processing-header">
+            <h3>Processing ${totalChannels} Channel${totalChannels > 1 ? 's' : ''}</h3>
+            <div class="channel-overall-progress">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="overall-progress-fill" style="width: 0%"></div>
+                </div>
+                <span class="progress-text" id="overall-progress-text">0 / ${totalChannels} completed</span>
+            </div>
+        </div>
+        <div class="channel-status-grid">
+    `;
+    
+    fluorophores.forEach((fluorophore, index) => {
+        statusHtml += `
+            <div class="channel-status-item" id="channel-status-${fluorophore}">
+                <div class="channel-info">
+                    <span class="channel-name">${fluorophore}</span>
+                    <span class="channel-number">Channel ${index + 1}</span>
+                </div>
+                <div class="channel-progress">
+                    <div class="status-indicator" id="status-indicator-${fluorophore}">
+                        <div class="status-spinner"></div>
+                    </div>
+                    <span class="status-text" id="status-text-${fluorophore}">Waiting...</span>
+                </div>
+            </div>
+        `;
+    });
+    
+    statusHtml += `
+        </div>
+        <div class="channel-processing-footer">
+            <span class="processing-note">Processing channels sequentially for optimal results...</span>
+        </div>
+    `;
+    
+    statusContainer.innerHTML = statusHtml;
+    statusContainer.style.display = 'block';
+    
+    // Initialize all channels as waiting
+    fluorophores.forEach(fluorophore => {
+        updateChannelStatus(fluorophore, 'waiting');
+    });
+}
+
+/**
+ * Update individual channel status in the UI
+ */
+function updateChannelStatus(fluorophore, status) {
+    const statusIndicator = document.getElementById(`status-indicator-${fluorophore}`);
+    const statusText = document.getElementById(`status-text-${fluorophore}`);
+    
+    if (!statusIndicator || !statusText) return;
+    
+    // Remove existing status classes
+    statusIndicator.className = 'status-indicator';
+    
+    switch (status) {
+        case 'waiting':
+            statusIndicator.classList.add('status-waiting');
+            statusText.textContent = 'Waiting...';
+            break;
+            
+        case 'processing':
+            statusIndicator.classList.add('status-processing');
+            statusText.textContent = 'Processing...';
+            break;
+            
+        case 'completed':
+            statusIndicator.classList.add('status-completed');
+            statusText.textContent = 'Completed ✓';
+            updateOverallProgress();
+            break;
+            
+        case 'failed':
+            statusIndicator.classList.add('status-failed');
+            statusText.textContent = 'Failed ✗';
+            updateOverallProgress();
+            break;
+    }
+}
+
+/**
+ * Update overall progress bar
+ */
+function updateOverallProgress() {
+    const allStatusTexts = document.querySelectorAll('[id^="status-text-"]');
+    const completed = Array.from(allStatusTexts).filter(el => 
+        el.textContent.includes('Completed') || el.textContent.includes('Failed')
+    ).length;
+    const total = allStatusTexts.length;
+    
+    const progressFill = document.getElementById('overall-progress-fill');
+    const progressText = document.getElementById('overall-progress-text');
+    
+    if (progressFill && progressText) {
+        const percentage = (completed / total) * 100;
+        progressFill.style.width = `${percentage}%`;
+        progressText.textContent = `${completed} / ${total} completed`;
+    }
+}
+
+/**
+ * Hide channel processing status UI
+ */
+function hideChannelProcessingStatus() {
+    const statusContainer = document.getElementById('channel-processing-status');
+    if (statusContainer) {
+        statusContainer.style.display = 'none';
+    }
+}
+
+/**
+ * Poll channel processing status from backend
+ */
+async function pollChannelProcessingStatus(experimentPattern, fluorophores) {
+    try {
+        const response = await fetch(`/channels/processing-status/${experimentPattern}`);
+        if (response.ok) {
+            const statusData = await response.json();
+            console.log('🔍 POLLING - Channel status:', statusData);
+            return statusData;
+        }
+    } catch (error) {
+        console.error('Error polling channel status:', error);
+    }
+    return null;
+}
+
+/**
+ * Wait for channel processing completion with backend verification
+ */
+async function waitForChannelProcessingCompletion(experimentPattern, fluorophores) {
+    console.log(`🔍 COMPLETION-WAIT - Waiting for ${fluorophores.length} channels to complete`);
+    
+    const maxAttempts = 30; // 30 seconds max wait
+    const pollInterval = 1000; // 1 second
+    
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const statusData = await pollChannelProcessingStatus(experimentPattern, fluorophores);
+        
+        if (statusData && statusData.channels) {
+            const allComplete = fluorophores.every(fluorophore => {
+                const channelStatus = statusData.channels[fluorophore];
+                return channelStatus && (channelStatus.status === 'completed' || channelStatus.status === 'failed');
+            });
+            
+            if (allComplete) {
+                console.log('✅ COMPLETION-WAIT - All channels completed');
+                return true;
+            }
+        }
+        
+        // Wait before next poll
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+    }
+    
+    console.warn('⚠️ COMPLETION-WAIT - Timeout waiting for channels to complete');
+    return false;
+}
+
+/**
+ * Mark channel as started in backend
+ */
+async function markChannelStarted(experimentPattern, fluorophore) {
+    // Disabled: This endpoint is for polling, not for marking channels as started
+    // The backend doesn't have an endpoint for marking individual channels as started
+    console.log(`🔍 CHANNEL-STATUS - Would mark ${fluorophore} as started for ${experimentPattern} (disabled)`);
+    return; // Skip this operation to avoid 400 errors
+    
+    try {
+        const response = await fetch('/channels/processing/poll', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                experiment_pattern: experimentPattern,
+                fluorophore: fluorophore,
+                action: 'start'
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Failed to mark channel started: ${response.status}`);
+        }
+    } catch (error) {
+        console.error(`Error marking channel ${fluorophore} as started:`, error);
+        // Non-critical, continue processing
+    }
+}
+
+/**
+ * Mark channel as failed in backend
+ */
+async function markChannelFailed(experimentPattern, fluorophore, errorMessage) {
+    // Disabled: This endpoint is for polling, not for marking channels as failed
+    // The backend doesn't have an endpoint for marking individual channels as failed
+    console.log(`🔍 CHANNEL-STATUS - Would mark ${fluorophore} as failed for ${experimentPattern}: ${errorMessage} (disabled)`);
+    return; // Skip this operation to avoid 400 errors
+    
+    try {
+        const response = await fetch('/channels/processing/poll', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                experiment_pattern: experimentPattern,
+                fluorophore: fluorophore,
+                action: 'fail',
+                error_message: errorMessage
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Failed to mark channel failed: ${response.status}`);
+        }
+    } catch (error) {
+        console.error(`Error marking channel ${fluorophore} as failed:`, error);
+        // Non-critical
+    }
+}
+
+/**
+ * Get current experiment pattern for tracking
+ */
+function getCurrentFullPattern() {
+    // Extract pattern from first uploaded file
+    const firstFile = Object.values(amplificationFiles)[0];
+    if (!firstFile || !firstFile.fileName) {
+        return `Unknown_${Date.now()}`;
+    }
+    
+    // Remove extension and create pattern
+    const baseName = firstFile.fileName.replace(/\.(csv|txt)$/i, '');
+    return baseName;
+}
+
+// ========================================
+// END MULTICHANNEL SEQUENTIAL PROCESSING
+// ========================================
 
 
 // Enhanced error handling for inconsistent 400 errors
@@ -585,153 +987,23 @@ async function performAnalysis() {
     if (loadingIndicator) loadingIndicator.style.display = 'flex';
 
     try {
-        // Analyze ALL uploaded fluorophores
-        const allResults = {};
+        // Get experiment pattern for tracking
+        const experimentPattern = getCurrentFullPattern();
         const fluorophores = Object.keys(amplificationFiles);
         
-        console.log(`🔍 UPLOAD-DEBUG - Starting analysis of ${fluorophores.length} fluorophores:`, fluorophores);
-        console.log(`🔍 UPLOAD-DEBUG - amplificationFiles contents:`, 
-            Object.fromEntries(Object.entries(amplificationFiles).map(([key, file]) => [key, {
-                fileName: file.fileName,
-                dataRows: file.data?.length || 0,
-                firstDataRow: file.data?.[1]?.slice(0, 5) || []
-            }]))
-        );
+        console.log(`🔍 SEQUENTIAL-PROCESSING - Starting sequential analysis of ${fluorophores.length} fluorophores:`, fluorophores);
+        console.log(`🔍 SEQUENTIAL-PROCESSING - Experiment pattern: ${experimentPattern}`);
         
-        for (const fluorophore of fluorophores) {
-            try {
-                console.log(`🔍 MULTI-PROCESS - Processing fluorophore: ${fluorophore} (${Object.keys(allResults).length + 1} of ${fluorophores.length})`);
-                console.log(`Analyzing ${fluorophore}...`);
-                
-                const selectedFile = amplificationFiles[fluorophore];
-                console.log(`🔍 MULTI-PROCESS - File for ${fluorophore}:`, selectedFile.fileName);
-                const analysisData = prepareAnalysisData(selectedFile.data);
-                
-                console.log(`🔍 DATA-PREP - Analysis data for ${fluorophore}:`, {
-                    hasData: !!analysisData,
-                    wellCount: Object.keys(analysisData || {}).length,
-                    firstWells: Object.keys(analysisData || {}).slice(0, 3),
-                    dataSize: JSON.stringify(analysisData || {}).length
-                });
-                
-                // Validate we have data to analyze
-                if (!analysisData || Object.keys(analysisData).length === 0) {
-                    console.warn(`🔍 DATA-PREP - No valid well data found for ${fluorophore}, SKIPPING`);
-                    continue;
-                }
-                
-                // Additional validation: Check for corrupt or incomplete data
-                const dataQuality = validateAnalysisDataQuality(analysisData, fluorophore);
-                if (!dataQuality.isValid) {
-                    console.error(`🔍 DATA-QUALITY - Invalid data for ${fluorophore}:`, dataQuality.issues);
-                    continue;
-                }
-            
-            console.log('Sending analysis data for', fluorophore, ':', analysisData);
-            
-            // Prepare request payload with samples data for SQL integration
-            const requestPayload = {
-                analysis_data: analysisData,
-                samples_data: null
-            };
-            
-            // Include samples data for SQL integration if available
-            if (samplesData) {
-                // Convert samples data to CSV string for backend processing
-                let samplesCSV = '';
-                if (typeof samplesData === 'string') {
-                    samplesCSV = samplesData;
-                } else if (samplesData.data) {
-                    // Convert Papa Parse object back to CSV
-                    samplesCSV = Papa.unparse(samplesData.data);
-                }
-                
-                if (samplesCSV) {
-                    requestPayload.samples_data = samplesCSV;
-                    console.log(`Including samples data for SQL integration (${samplesCSV.length} chars)`);
-                }
-            }
-            
-            // Send to backend for analysis with retry mechanism
-            let response;
-            try {
-                console.log(`🔍 NETWORK-DEBUG - Starting fetch for ${fluorophore}...`);
-                
-                // Validate request payload before sending
-                console.log(`🔍 PAYLOAD-DEBUG - Request payload for ${fluorophore}:`, {
-                    hasAnalysisData: !!requestPayload.analysis_data,
-                    analysisDataKeys: Object.keys(requestPayload.analysis_data || {}),
-                    analysisDataSize: JSON.stringify(requestPayload.analysis_data || {}).length,
-                    hasSamplesData: !!requestPayload.samples_data,
-                    samplesDataSize: requestPayload.samples_data?.length || 0
-                });
-                
-                response = await fetchWithRetry('/analyze', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Filename': selectedFile.fileName,
-                        'X-Fluorophore': fluorophore
-                    },
-                    body: JSON.stringify(requestPayload)
-                });
-                console.log(`🔍 NETWORK-DEBUG - Fetch completed for ${fluorophore}, status: ${response.status}`);
-            } catch (networkError) {
-                console.error(`🔍 NETWORK-ERROR - Fetch failed for ${fluorophore} after retries:`, networkError);
-                throw new Error(`Network error for ${fluorophore}: ${networkError.message}`);
-            }
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                console.error('Server error response:', errorData);
-                throw new Error(errorData.error || `Server error: ${response.status}`);
-            }
-
-            let results;
-            try {
-                // Use response.json() directly since backend now returns proper JSON
-                results = await response.json();
-                
-                console.log(`🔍 JSON-DEBUG - Direct JSON parse for ${fluorophore}:`, {
-                    type: typeof results,
-                    hasIndividualResults: !!(results?.individual_results),
-                    individualResultsType: typeof results?.individual_results,
-                    wellCount: Object.keys(results?.individual_results || {}).length,
-                    successRate: results?.success_rate,
-                    totalWells: results?.total_wells
-                });
-                
-                console.log(`Analysis results for ${fluorophore}:`, results);
-                
-                // Store results for this fluorophore
-                allResults[fluorophore] = results;
-                console.log(`🔍 MULTI-PROCESS - Stored results for ${fluorophore}, total results now:`, Object.keys(allResults));
-                
-                // IMPORTANT: Verify results are properly stored and not being overwritten
-                console.log(`🔍 STORAGE-CHECK - After storing ${fluorophore}:`);
-                Object.keys(allResults).forEach(key => {
-                    const result = allResults[key];
-                    console.log(`  - ${key}: ${result ? 'HAS_DATA' : 'NULL'} | wells: ${Object.keys(result?.individual_results || {}).length} | success_rate: ${result?.success_rate}`);
-                });
-                
-                // Add a small delay to ensure proper sequencing
-                await new Promise(resolve => setTimeout(resolve, 100));
-                
-            } catch (parseError) {
-                console.error(`🔍 PARSE-ERROR - JSON parsing failed for ${fluorophore}:`, parseError);
-                // Continue with other fluorophores even if one fails to parse
-                continue;
-            }
-            
-        } catch (fluorophoreError) {
-            console.error(`🔍 FLUOR-ERROR - Failed to process ${fluorophore}:`, fluorophoreError);
-            // Continue with other fluorophores even if one completely fails
-            continue;
-        }
-    }
+        // Display initial channel processing status
+        displayChannelProcessingStatus(fluorophores, experimentPattern);
         
-        // Debug: Final check of allResults after the loop completes
-        console.log('🔍 LOOP-COMPLETE - Final allResults after processing all fluorophores:');
+        // Process channels sequentially with transaction-like behavior
+        const allResults = await processChannelsSequentially(fluorophores, experimentPattern);
+        
+        console.log(`🔍 SEQUENTIAL-PROCESSING - All channels completed successfully:`, Object.keys(allResults));
+        
+        // Debug: Final check of allResults after sequential processing
+        console.log('🔍 SEQUENTIAL-COMPLETE - Final allResults after sequential processing:');
         Object.keys(allResults).forEach(key => {
             const result = allResults[key];
             console.log(`  - FINAL ${key}: ${result ? 'HAS_DATA' : 'NULL'} | wells: ${Object.keys(result?.individual_results || {}).length} | success_rate: ${result?.success_rate}`);
@@ -741,22 +1013,8 @@ async function performAnalysis() {
             }
         });
         
-        // Debug: Check all results collected before processing
-        console.log('🔍 MULTI-DEBUG - All results collected:', {
-            fluorophores: Object.keys(allResults),
-            resultCounts: Object.fromEntries(
-                Object.entries(allResults).map(([fluor, result]) => [
-                    fluor, 
-                    {
-                        hasResults: !!result,
-                        hasIndividualResults: !!(result?.individual_results),
-                        wellCount: Object.keys(result?.individual_results || {}).length,
-                        successRate: result?.success_rate,
-                        totalWells: result?.total_wells
-                    }
-                ])
-            )
-        });
+        // Hide channel processing status and show completion
+        hideChannelProcessingStatus();
         
         // If only one fluorophore was analyzed, save it properly to database
         if (fluorophores.length === 1) {
@@ -931,6 +1189,20 @@ async function displayAnalysisResults(results) {
     console.log('🔍 FRESH UPLOAD - Current analysis results available:', !!currentAnalysisResults);
     console.log('🔍 FRESH UPLOAD - Individual results count:', Object.keys(individualResults).length);
     
+    // Debug the structure of individual results
+    console.log('🔍 FRESH UPLOAD - Individual results structure:');
+    const sampleKeys = Object.keys(individualResults).slice(0, 5);
+    sampleKeys.forEach(key => {
+        const result = individualResults[key];
+        console.log(`  ${key}:`, {
+            sample_name: result.sample_name || result.sample,
+            well_id: result.well_id,
+            fluorophore: result.fluorophore,
+            amplitude: result.amplitude,
+            keys: Object.keys(result)
+        });
+    });
+    
     if (testCode) {
         // Clear any existing control grids first to prevent duplicates
         const pathogenGridsContainer = document.getElementById('pathogenControlGrids');
@@ -939,20 +1211,16 @@ async function displayAnalysisResults(results) {
             pathogenGridsContainer.style.display = 'none';
         }
         
-        // Use real pathogen grid system for fresh uploads (same as used to work)
-        if (window.showPathogenGridsWithData && typeof window.showPathogenGridsWithData === 'function') {
-            console.log('🔍 FRESH UPLOAD - Using real pathogen grids system');
-            console.log('🔍 FRESH UPLOAD - Forcing grid display in 100ms...');
-            setTimeout(() => {
-                console.log('🔍 FRESH UPLOAD - Calling showPathogenGridsWithData now');
-                window.showPathogenGridsWithData(testCode, controlIssues || []);
-            }, 100);
-        } else {
-            console.log('🔍 FRESH UPLOAD - showPathogenGridsWithData not available, using universal fallback');
-            setTimeout(() => {
-                createUniversalControlGrid(testCode, individualResults);
-            }, 100);
-        }
+        // Use the real control grid system (createPathogenControlGrids)
+        // Extract real control coordinates using same logic as history loads
+        const wellsArray = Object.values(individualResults);
+        console.log('🔍 FRESH UPLOAD - Converting to wells array, length:', wellsArray.length);
+        console.log('🔍 FRESH UPLOAD - First well in array:', wellsArray[0]);
+        
+        const { controlsByType, controlsByChannel } = extractRealControlCoordinates(wellsArray, testCode);
+        
+        // Use the controlsByChannel structure for grid creation
+        createPathogenControlGrids(controlsByChannel, testCode);
     } else {
         console.log('🔍 FRESH UPLOAD - Could not extract test code from pattern:', experimentPattern);
         console.log('🔍 FRESH UPLOAD - Available amplification files:', Object.keys(amplificationFiles || {}));
@@ -1092,18 +1360,13 @@ async function displayMultiFluorophoreResults(results) {
             pathogenGridsContainer.style.display = 'none';
         }
         
-        // Always create control grids for multi-fluorophore results
-        if (window.showPathogenGridsWithData && typeof window.showPathogenGridsWithData === 'function') {
-            console.log('🔍 MULTI-FLUOROPHORE - Using real pathogen grids system');
-            setTimeout(() => {
-                window.showPathogenGridsWithData(testCode, controlIssues);
-            }, 100);
-        } else {
-            console.log('🔍 MULTI-FLUOROPHORE - Fallback to universal control grid');
-            setTimeout(() => {
-                createUniversalControlGrid(testCode, results.individual_results);
-            }, 100);
-        }
+        // Use the real control grid system (createPathogenControlGrids)
+        // Extract real control coordinates using same logic as history loads
+        const wellsArray = Object.values(results.individual_results);
+        const { controlsByType, controlsByChannel } = extractRealControlCoordinates(wellsArray, testCode);
+        
+        // Use the controlsByChannel structure for grid creation
+        createPathogenControlGrids(controlsByChannel, testCode);
     } else {
         console.log('🔍 MULTI-FLUOROPHORE - Could not extract test code from pattern:', experimentPattern);
     }
@@ -1155,10 +1418,14 @@ async function displayMultiFluorophoreResults(results) {
             console.log('🔍 CONTROL VALIDATION - Applied to loaded session, found', controlIssues.length, 'issues');
             
             const testCode = extractTestCode(getCurrentFullPattern());
-            const controlSets = extractControlSets(currentAnalysisResults.individual_results, testCode);
             
-            console.log('🔍 PATHOGEN GRIDS - Creating grids for loaded session:', testCode, 'with', Object.keys(controlSets).length, 'control sets');
-            createPathogenControlGrids(controlSets, testCode);
+            console.log('🔍 PATHOGEN GRIDS - Creating grids for loaded session:', testCode);
+            // Use the real control grid system (extractRealControlCoordinates)
+            const wellsArray = Object.values(currentAnalysisResults.individual_results);
+            const { controlsByType, controlsByChannel } = extractRealControlCoordinates(wellsArray, testCode);
+            
+            // Use the controlsByChannel structure for grid creation
+            createPathogenControlGrids(controlsByChannel, testCode);
         }
     }, 400);
     
@@ -4959,15 +5226,21 @@ function addPathogenInfoToControlValidation(testCode, individualResults) {
 }
 
 function triggerUniversalControlGridDisplay() {
-    // Trigger universal control grid display for loaded session
-    console.log('🔍 Triggering universal control grid display');
+    // Trigger real pathogen control grid display for loaded session
+    console.log('🔍 Triggering real pathogen control grid display for loaded session');
     
     if (currentAnalysisResults && currentAnalysisResults.individual_results) {
         // Extract test code from current results
         const testCode = extractTestCodeFromResults(currentAnalysisResults);
         if (testCode) {
-            console.log('🔍 Creating universal control grid for test:', testCode);
-            createUniversalControlGrid(testCode, currentAnalysisResults.individual_results);
+            console.log('🔍 Using real pathogen grid system for loaded session, test:', testCode);
+            
+            // Use the real control grid system (extractRealControlCoordinates)
+            const wellsArray = Object.values(currentAnalysisResults.individual_results);
+            const { controlsByType, controlsByChannel } = extractRealControlCoordinates(wellsArray, testCode);
+            
+            // Use the controlsByChannel structure for grid creation
+            createPathogenControlGrids(controlsByChannel, testCode);
         } else {
             console.log('🔍 Could not extract test code from results');
         }
@@ -5013,135 +5286,9 @@ function extractTestCodeFromResults(results) {
     return null;
 }
 
-function createUniversalControlGrid(testCode, individualResults) {
-    console.log('🔍 UNIVERSAL GRID - Creating control grid for testCode:', testCode);
-    
-    const pathogenGridsContainer = document.getElementById('pathogenControlGrids');
-    if (!pathogenGridsContainer) {
-        console.log('🔍 UNIVERSAL GRID - Container not found');
-        return;
-    }
-    
-    // Clear any existing content to prevent duplicates
-    pathogenGridsContainer.innerHTML = '';
-    pathogenGridsContainer.style.display = 'none';
-    
-    // Get pathogen mapping for this test
-    const pathogenMapping = getPathogenMappingForTest ? getPathogenMappingForTest(testCode) : null;
-    console.log('🔍 UNIVERSAL GRID - Pathogen mapping:', pathogenMapping);
-    
-    if (!pathogenMapping) {
-        console.log('🔍 UNIVERSAL GRID - No pathogen mapping found');
-        return;
-    }
-    
-    // Extract real control data from analysis results
-    const controlData = {};
-    Object.entries(individualResults).forEach(([wellKey, wellData]) => {
-        const sampleName = wellData.sample_name || wellData.sample || '';
-        if (sampleName.includes('-')) {
-            const controlMatch = sampleName.match(/([HML]|NTC)-(\d+)$/);
-            if (controlMatch) {
-                const [, controlType, setNum] = controlMatch;
-                const fluorophore = wellData.fluorophore || wellKey.split('_').pop() || 'Unknown';
-                const key = `${fluorophore}_${controlType}_${setNum}`;
-                
-                controlData[key] = {
-                    wellKey: wellKey,
-                    coordinate: wellData.well_id || wellKey.split('_')[0],
-                    amplitude: wellData.amplitude || 0,
-                    result: wellData.amplitude > 500 ? 'POS' : wellData.amplitude < 400 ? 'NEG' : 'REDO',
-                    controlType: controlType,
-                    setNumber: setNum,
-                    fluorophore: fluorophore
-                };
-            }
-        }
-    });
-    
-    console.log('🔍 UNIVERSAL GRID - Control data extracted:', controlData);
-    
-    // Create tabbed interface for each pathogen
-    let gridHTML = '<div class="universal-pathogen-tabs">';
-    
-    Object.entries(pathogenMapping).forEach(([fluorophore, pathogenName], index) => {
-        const isActive = index === 0 ? 'active' : '';
-        gridHTML += `<button class="pathogen-tab ${isActive}" onclick="showUniversalPathogenTab('${fluorophore}', event)">${pathogenName} (${fluorophore})</button>`;
-    });
-    
-    gridHTML += '</div><div class="universal-pathogen-content">';
-    
-    Object.entries(pathogenMapping).forEach(([fluorophore, pathogenName], index) => {
-        const isActive = index === 0 ? 'style="display: block;"' : 'style="display: none;"';
-        gridHTML += `
-            <div class="universal-pathogen-panel" id="universal-panel-${fluorophore}" ${isActive}>
-                <h4>${pathogenName} (${fluorophore}) Controls</h4>
-                <div class="universal-control-grid">
-                    <div class="grid-corner">Control</div>
-                    <div class="set-header">Set 1</div>
-                    <div class="set-header">Set 2</div>
-                    <div class="set-header">Set 3</div>
-                    <div class="set-header">Set 4</div>
-        `;
-        
-        ['H', 'M', 'L', 'NTC'].forEach(controlType => {
-            gridHTML += `<div class="control-type-label">${controlType}</div>`;
-            for (let set = 1; set <= 4; set++) {
-                const key = `${fluorophore}_${controlType}_${set}`;
-                const control = controlData[key];
-                
-                if (control) {
-                    const symbol = control.result === 'POS' ? '✓' : control.result === 'NEG' ? '✗' : '~';
-                    const className = control.result === 'POS' ? 'valid' : control.result === 'NEG' ? 'invalid' : 'redo';
-                    gridHTML += `<div class="universal-control-cell ${className}" title="${pathogenName} ${controlType} Set ${set}&#10;Well: ${control.coordinate}&#10;Amplitude: ${control.amplitude}&#10;Result: ${control.result}">${symbol}<br><small>${control.coordinate}</small></div>`;
-                } else {
-                    gridHTML += `<div class="universal-control-cell missing" title="Missing ${controlType} control for Set ${set}">-</div>`;
-                }
-            }
-        });
-        
-        gridHTML += '</div></div>';
-    });
-    
-    gridHTML += '</div>';
-    
-    pathogenGridsContainer.innerHTML = gridHTML;
-    pathogenGridsContainer.style.display = 'block';
-    
-    console.log('🔍 UNIVERSAL GRID - Control grid created successfully');
-}
+// Note: createUniversalControlGrid function removed - only use real pathogen_library.js grid system
 
-// Function to switch between pathogen tabs in universal grid
-function showUniversalPathogenTab(fluorophore, event) {
-    // Hide all panels
-    document.querySelectorAll('.universal-pathogen-panel').forEach(panel => {
-        panel.style.display = 'none';
-    });
-    
-    // Remove active class from all tabs
-    document.querySelectorAll('.pathogen-tab').forEach(tab => {
-        tab.classList.remove('active');
-    });
-    
-    // Show selected panel
-    const panel = document.getElementById(`universal-panel-${fluorophore}`);
-    if (panel) {
-        panel.style.display = 'block';
-    }
-    
-    // Add active class to clicked tab
-    if (event && event.target) {
-        event.target.classList.add('active');
-    } else {
-        // Fallback: find the tab by fluorophore and make it active
-        const tabs = document.querySelectorAll('.pathogen-tab');
-        tabs.forEach(tab => {
-            if (tab.textContent.includes(fluorophore)) {
-                tab.classList.add('active');
-            }
-        });
-    }
-}
+// Note: showUniversalPathogenTab function removed - only use real pathogen_library.js grid system
 
 // Helper function to get full experiment pattern
 function getCurrentFullPattern() {
@@ -5525,7 +5672,9 @@ async function createCombinedResultsFromSessions(sessions) {
             const sessionData = await sessionResponse.json();
             if (sessionData.well_results) {
                 sessionData.well_results.forEach(well => {
-                    const wellKey = well.well_id || `${well.well_id}_${well.fluorophore}`;
+                    const wellKey = well.well_id ? 
+                        (well.well_id.includes('_') ? well.well_id : `${well.well_id}_${well.fluorophore}`) :
+                        `${well.coordinate || 'unknown'}_${well.fluorophore}`;
                     allWellResults[wellKey] = {
                         amplitude: well.amplitude || 0,
                         anomalies: well.anomalies,
@@ -6142,17 +6291,40 @@ function calculateFluorophoreStats(individualResults) {
 
 // Helper function to identify control samples (same logic as Controls filter)
 function isControlSample(sampleName, testPattern) {
-    if (!sampleName) return false;
+    if (!sampleName) {
+        console.log('🔍 CONTROL DETECTION - No sample name provided');
+        return false;
+    }
+    
+    console.log('🔍 CONTROL DETECTION - Checking sample:', sampleName, 'with pattern:', testPattern);
     
     // Check for common control patterns
-    if (sampleName.includes('NTC') || 
-        sampleName.match(/[HML]-\d+$/) ||  // H/M/L suffix before dash and numbers
-        sampleName.toLowerCase().includes('control') ||
-        sampleName.toLowerCase().includes('blank') ||
-        (testPattern && sampleName.startsWith(testPattern))) {
+    if (sampleName.includes('NTC')) {
+        console.log('🔍 CONTROL DETECTION - Found NTC control');
         return true;
     }
     
+    if (sampleName.match(/[HML]-\d+$/)) {
+        console.log('🔍 CONTROL DETECTION - Found H/M/L control with dash-number pattern');
+        return true;
+    }
+    
+    if (sampleName.toLowerCase().includes('control')) {
+        console.log('🔍 CONTROL DETECTION - Found control in name');
+        return true;
+    }
+    
+    if (sampleName.toLowerCase().includes('blank')) {
+        console.log('🔍 CONTROL DETECTION - Found blank control');
+        return true;
+    }
+    
+    if (testPattern && sampleName.startsWith(testPattern)) {
+        console.log('🔍 CONTROL DETECTION - Found test pattern control');
+        return true;
+    }
+    
+    console.log('🔍 CONTROL DETECTION - No control pattern found');
     return false;
 }
 
@@ -6190,37 +6362,110 @@ function extractRealControlCoordinates(wellResults, testPattern) {
     console.log('🔍 REAL CONTROLS - Starting extraction with', wellResults.length, 'wells for test:', testPattern);
     console.log('🔍 REAL CONTROLS - Using same filter logic as dropdown Controls filter');
     
+    // Log first few sample names to see the data format
+    if (wellResults.length > 0) {
+        console.log('🔍 REAL CONTROLS - Sample data format check:');
+        wellResults.slice(0, 5).forEach((well, index) => {
+            console.log(`  Well ${index}:`, {
+                sample_name: well.sample_name,
+                sample: well.sample,
+                well_id: well.well_id,
+                fluorophore: well.fluorophore
+            });
+        });
+    }
+    
     const controlsByType = { H: [], M: [], L: [], NTC: [] };
     const controlsByChannel = {};
     
-    wellResults.forEach(well => {
-        const sampleName = well.sample_name || '';
-        const wellId = well.well_id || '';
-        const fluorophore = well.fluorophore || 'Unknown';
+    wellResults.forEach((well, index) => {
+        // Debug the first few wells to see their structure
+        if (index < 3) {
+            console.log(`🔍 REAL CONTROLS - Well ${index} structure:`, {
+                keys: Object.keys(well),
+                sample_name: well.sample_name,
+                well_id: well.well_id,
+                fluorophore: well.fluorophore,
+                coordinate: well.coordinate,
+                well_position: well.well_position,
+                wellType: typeof well,
+                wellIdType: typeof well.well_id
+            });
+        }
+        
+        // Handle potential JSON string data
+        let wellData = well;
+        if (typeof well === 'string') {
+            try {
+                wellData = JSON.parse(well);
+                console.log('🔍 REAL CONTROLS - Parsed well data from JSON string');
+            } catch (e) {
+                console.warn('🔍 REAL CONTROLS - Failed to parse well JSON:', e);
+                wellData = well;
+            }
+        }
+        
+        const sampleName = wellData.sample_name || wellData.sample || '';
+        const wellId = wellData.well_id || wellData.wellId || wellData.id || '';
+        const fluorophore = wellData.fluorophore || 'Unknown';
         
         // STEP 1: Use same logic as Controls filter dropdown
         if (isControlSample(sampleName, testPattern)) {
             const controlType = extractControlTypeFromSample(sampleName);
             
+            console.log('🔍 REAL CONTROLS - Found control:', {
+                sampleName: sampleName,
+                wellId: wellId,
+                fluorophore: fluorophore,
+                controlType: controlType,
+                wellIdType: typeof wellId,
+                wellIdLength: wellId.length
+            });
+            
             if (controlType && controlsByType[controlType]) {
-                // STEP 5: Extract well coordinate and use as matching coordinates
-                const wellCoordinate = wellId.split('_')[0]; // Extract A1 from A1_Cy5
+                // STEP 5: Extract well coordinate with better error handling
+                let wellCoordinate = '';
+                
+                // Try different coordinate extraction methods
+                if (wellId && typeof wellId === 'string') {
+                    if (wellId.includes('_')) {
+                        // Format: A1_Cy5 -> A1
+                        wellCoordinate = wellId.split('_')[0];
+                    } else {
+                        // Maybe it's just the coordinate itself: A1
+                        wellCoordinate = wellId;
+                    }
+                } else if (wellData.coordinate) {
+                    // Maybe coordinate is stored separately
+                    wellCoordinate = wellData.coordinate;
+                } else if (wellData.well_position) {
+                    // Alternative field name
+                    wellCoordinate = wellData.well_position;
+                }
+                
+                console.log('🔍 REAL CONTROLS - Extracted coordinate:', wellCoordinate, 'from wellId:', wellId);
+                
+                // Validate that we have a proper coordinate
+                if (!wellCoordinate || wellCoordinate.trim() === '') {
+                    console.warn('🔍 REAL CONTROLS - Invalid well coordinate for:', wellId, 'sample:', sampleName, 'well object keys:', Object.keys(wellData));
+                    return; // Skip this control if coordinate is invalid
+                }
                 
                 const controlData = {
                     wellId: wellId,
                     coordinate: wellCoordinate, // Use extracted well coordinate (A1, G10, etc.)
                     sampleName: sampleName,
                     fluorophore: fluorophore,
-                    amplitude: well.amplitude || 0,
+                    amplitude: wellData.amplitude || 0,
                     type: controlType,
                     // Include complete well analysis data for validation
-                    is_good_scurve: well.is_good_scurve,
-                    anomalies: well.anomalies,
-                    r2_score: well.r2_score,
-                    rmse: well.rmse,
-                    steepness: well.steepness,
-                    midpoint: well.midpoint,
-                    baseline: well.baseline
+                    is_good_scurve: wellData.is_good_scurve,
+                    anomalies: wellData.anomalies,
+                    r2_score: wellData.r2_score,
+                    rmse: wellData.rmse,
+                    steepness: wellData.steepness,
+                    midpoint: wellData.midpoint,
+                    baseline: wellData.baseline
                 };
                 
                 console.log(`🔍 REAL CONTROLS - Step 5: Extracted well coordinate ${wellCoordinate} for ${controlType} control`);
@@ -6251,11 +6496,27 @@ function extractRealControlCoordinates(wellResults, testPattern) {
 // Function to sort coordinates in 384-well grid order (lowest number first, then lowest letter)
 function sortCoordinatesGridOrder(coordinates) {
     return coordinates.sort((a, b) => {
-        // Extract row letter and column number
-        const aRow = a.coordinate.match(/([A-P])/)[1];
-        const aCol = parseInt(a.coordinate.match(/(\d+)/)[1]);
-        const bRow = b.coordinate.match(/([A-P])/)[1];
-        const bCol = parseInt(b.coordinate.match(/(\d+)/)[1]);
+        // Check if coordinates are valid
+        if (!a || !a.coordinate || !b || !b.coordinate) {
+            console.warn('🔍 SORT - Invalid coordinate data:', { a, b });
+            return 0; // Keep original order for invalid data
+        }
+        
+        // Extract row letter and column number with null checks
+        const aMatch = a.coordinate.match(/([A-P])/);
+        const aColMatch = a.coordinate.match(/(\d+)/);
+        const bMatch = b.coordinate.match(/([A-P])/);
+        const bColMatch = b.coordinate.match(/(\d+)/);
+        
+        if (!aMatch || !aColMatch || !bMatch || !bColMatch) {
+            console.warn('🔍 SORT - Invalid coordinate format:', a.coordinate, b.coordinate);
+            return 0; // Keep original order for invalid formats
+        }
+        
+        const aRow = aMatch[1];
+        const aCol = parseInt(aColMatch[1]);
+        const bRow = bMatch[1];
+        const bCol = parseInt(bColMatch[1]);
         
         // Sort by column first (1-24), then by row (A-P)
         if (aCol !== bCol) {
@@ -6698,8 +6959,8 @@ function validateControlTypes(wellResults) {
     
     console.log('🔍 CONTROL VALIDATION - Extracted test name:', testName, 'from pattern:', experimentPattern);
     
-    // Create pathogen grids from detected control sets
-    createPathogenControlGrids(controlSets, testName);
+    // NOTE: This function is for control validation, NOT for creating pathogen grids
+    // Pathogen grids should be created in the main upload processing sections
     
     return controlSets;
 }
@@ -6717,8 +6978,8 @@ function validateControlTypesWithPattern(wellResults, experimentPattern) {
     
     console.log('🔍 CONTROL VALIDATION - Extracted test name:', testName, 'from pattern:', experimentPattern);
     
-    // Create pathogen grids from detected control sets
-    createPathogenControlGrids(controlSets, testName);
+    // NOTE: This function is for control validation, NOT for creating pathogen grids
+    // Pathogen grids should be created in the main upload processing sections
     
     return controlSets;
 }
@@ -9089,6 +9350,12 @@ function extractControlSets(individualResults, testName) {
         const setNumber = index + 1;
         console.log(`🔍 CHECKING COORDINATE ${coord} for Set ${setNumber}`);
         
+        // Ensure coord is valid
+        if (!coord || typeof coord !== 'string') {
+            console.warn(`🔍 INVALID COORDINATE: ${coord}`);
+            return;
+        }
+        
         // Check all fluorophores for this coordinate
         ['Cy5', 'FAM', 'HEX'].forEach(fluorophore => {
             const wellKey = `${coord}_${fluorophore}`;
@@ -9106,7 +9373,7 @@ function extractControlSets(individualResults, testName) {
                     wellId: wellKey,
                     sample_name: result.sample_name || result.sample || `Control-${coord}`,
                     fluorophore: result.fluorophore || fluorophore,
-                    coordinate: coord,
+                    coordinate: coord || 'Unknown', // Ensure coordinate is never null
                     amplitude: result.amplitude || 0,
                     isValid: (result.amplitude || 0) > 500
                 });
@@ -9539,28 +9806,11 @@ function getControlValidationForPathogen(pathogenName, controlType, setNumber) {
     };
 }
 
-function createPathogenControlGrids(controlSets, testName) {
-    console.log('🔍 PATHOGEN GRIDS - Using real control extraction for test:', testName);
+function createPathogenControlGrids(controlsByChannel, testName) {
+    console.log('🔍 PATHOGEN GRIDS - Creating grids for test:', testName);
+    console.log('🔍 PATHOGEN GRIDS - Received controls by channel:', Object.keys(controlsByChannel));
     
-    // Get current analysis results
-    const wellsArray = Array.isArray(window.currentAnalysisResults)
-        ? window.currentAnalysisResults
-        : window.currentAnalysisResults && typeof window.currentAnalysisResults === 'object'
-            ? (window.currentAnalysisResults.individual_results
-                ? Object.values(window.currentAnalysisResults.individual_results)
-                : Object.values(window.currentAnalysisResults))
-            : [];
-    if (!wellsArray || wellsArray.length === 0) {
-        console.log('🔍 PATHOGEN GRIDS - No current analysis results available');
-        return;
-    }
-    // Extract real control coordinates using same logic as Controls filter
-    const wellResultsArray = wellsArray;
-    
-    const { controlsByType, controlsByChannel } = extractRealControlCoordinates(wellResultsArray, testName);
-    
-    console.log('🔍 PATHOGEN GRIDS - Extracted controls by type:', Object.keys(controlsByType).map(type => 
-        `${type}: ${controlsByType[type].length}`));
+    // Use the passed controlsByChannel data directly
     console.log('🔍 PATHOGEN GRIDS - Extracted controls by channel:', Object.keys(controlsByChannel));
     
     // Organize controls into sets based on grid position

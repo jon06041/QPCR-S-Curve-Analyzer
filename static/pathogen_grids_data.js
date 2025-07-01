@@ -47,12 +47,21 @@ function showPathogenGridsWithData(testCode, controlSets) {
     } else if (testCode === 'Ngon') {
         createTabbedPathogenGrids(container, 'Ngon', controlValidationData);
     } else {
-        // Fallback: static grid function not defined, show message
-        console.warn('No static grid fallback available for testCode:', testCode);
-        const fallbackDiv = document.createElement('div');
-        fallbackDiv.className = 'no-static-grid-warning';
-        fallbackDiv.innerHTML = `<p style="color: #b00; font-weight: bold;">No static grid available for test code: <code>${testCode}</code></p>`;
-        container.appendChild(fallbackDiv);
+        // Fallback: Use universal control grid for unsupported test codes
+        console.warn('No specific grid available for testCode:', testCode, '- using universal fallback');
+        if (window.createUniversalControlGrid && typeof window.createUniversalControlGrid === 'function') {
+            // Extract individual results from currentAnalysisResults
+            let individualResults = {};
+            if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+                individualResults = window.currentAnalysisResults.individual_results;
+            }
+            window.createUniversalControlGrid(testCode, individualResults);
+        } else {
+            const fallbackDiv = document.createElement('div');
+            fallbackDiv.className = 'no-static-grid-warning';
+            fallbackDiv.innerHTML = `<p style="color: #b00; font-weight: bold;">No grid system available for test code: <code>${testCode}</code></p>`;
+            container.appendChild(fallbackDiv);
+        }
     }
 }
 

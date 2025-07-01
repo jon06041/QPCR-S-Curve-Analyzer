@@ -2,11 +2,29 @@ from flask import Flask, request, jsonify, send_from_directory
 import json
 import os
 import re
+import traceback
+import numpy as np
 from datetime import datetime
 from qpcr_analyzer import process_csv_data, validate_csv_structure
 from models import db, AnalysisSession, WellResult, ExperimentStatistics
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.exc import OperationalError, IntegrityError, DatabaseError
+
+def safe_json_dumps(value, default=None):
+    """Helper function to safely serialize to JSON, avoiding double-encoding"""
+    if value is None:
+        return None
+    # If already a string, assume it's already JSON-encoded
+    if isinstance(value, str):
+        try:
+            # Validate it's valid JSON
+            json.loads(value)
+            return value
+        except (json.JSONDecodeError, TypeError):
+            # If not valid JSON, treat as a raw string and encode it
+            return json.dumps(value)
+    # Otherwise, serialize the object/list to JSON
+    return json.dumps(value if value is not None else default)
 
 def get_pathogen_mapping():
     """Centralized pathogen mapping that matches pathogen_library.js"""
@@ -136,7 +154,7 @@ def validate_file_pattern_consistency(filenames):
 def save_individual_channel_session(filename, results, fluorophore, summary):
     """Save individual channel session to database for channel tracking with completion status"""
     try:
-        from models import AnalysisSession, WellResult, ChannelCompletionStatus
+        from models import AnalysisSession, WellResult
         
         # Extract experiment pattern and test code for completion tracking
         base_pattern = extract_base_pattern(filename)
@@ -161,16 +179,8 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             
             print(f"DEBUG: Enhanced fluorophore detection result: {fluorophore}")
         
-        # Get pathogen target for completion tracking
+        # Get pathogen target for naming purposes
         pathogen_target = get_pathogen_target(test_code, fluorophore)
-        
-        # Mark channel as started if not already tracked
-        ChannelCompletionStatus.mark_channel_started(
-            experiment_pattern=base_pattern,
-            fluorophore=fluorophore,
-            test_code=test_code,
-            pathogen_target=pathogen_target
-        )
         
         # Calculate statistics from results
         individual_results = results.get('individual_results', {})
@@ -314,6 +324,20 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                     # Add fluorophore suffix if not present
                     if fluorophore and not well_key.endswith(f'_{fluorophore}'):
                         well_key = f"{well_key}_{fluorophore}"
+                    
+                    # Debug well_id construction and control sample detection
+                    sample_name = result.get('sample_name', '')
+                    print(f"[CONTROL DEBUG] Well {well_key}: sample_name='{sample_name}', fluorophore='{fluorophore}'")
+                    
+                    # Ensure well data has fluorophore and coordinate info for control grid
+                    if 'fluorophore' not in result and fluorophore:
+                        result['fluorophore'] = fluorophore
+                    
+                    # Extract coordinate from well_id for control grid (remove fluorophore suffix)
+                    base_coordinate = well_key.split('_')[0] if '_' in well_key else well_key
+                    if 'coordinate' not in result:
+                        result['coordinate'] = base_coordinate
+                    
                     results_items.append((well_key, result))
                 else:
                     print(f"Warning: List item {i} is not a valid dict or missing well_id: {type(result)}")
@@ -327,6 +351,13 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             if not isinstance(well_data, dict):
                 print(f"Warning: well_data for {well_key} is not a dict: {type(well_data)}")
                 continue
+                
+            # Debug control sample information before saving to database
+            sample_name = well_data.get('sample_name', '')
+            coordinate = well_data.get('coordinate', '')
+            if sample_name and any(control in sample_name.upper() for control in ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC']):
+                print(f"[CONTROL SAVE] Control well {well_key}: sample='{sample_name}', coord='{coordinate}', fluor='{fluorophore}'")
+                
             try:
                 well_result = WellResult()
                 well_result.session_id = session.id
@@ -341,21 +372,6 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                 well_result.data_points = int(well_data.get('data_points', 0)) if well_data.get('data_points') is not None else None
                 well_result.cycle_range = float(well_data.get('cycle_range', 0)) if well_data.get('cycle_range') is not None else None
                 # JSON/text fields - ensure they are converted to JSON strings for database storage
-                # Helper function to safely serialize to JSON, avoiding double-encoding
-                def safe_json_dumps(value, default=None):
-                    if value is None:
-                        return None
-                    # If already a string, assume it's already JSON-encoded
-                    if isinstance(value, str):
-                        try:
-                            # Validate it's valid JSON
-                            json.loads(value)
-                            return value
-                        except (json.JSONDecodeError, TypeError):
-                            # If not valid JSON, treat as a raw string and encode it
-                            return json.dumps(value)
-                    # Otherwise, serialize the object/list to JSON
-                    return json.dumps(value if value is not None else default)
                 
                 well_result.fit_parameters = safe_json_dumps(well_data.get('fit_parameters'), [])
                 well_result.parameter_errors = safe_json_dumps(well_data.get('parameter_errors'), [])
@@ -365,8 +381,15 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                 well_result.raw_rfu = safe_json_dumps(well_data.get('raw_rfu'), [])
                 well_result.sample_name = str(well_data.get('sample_name', '')) if well_data.get('sample_name') else None
                 well_result.cq_value = float(well_data.get('cq_value', 0)) if well_data.get('cq_value') is not None else None
-                # Set fluorophore if present
-                well_result.fluorophore = str(well_data.get('fluorophore', '')) if well_data.get('fluorophore') else None
+                
+                # Set fluorophore if present - prioritize function parameter over well data
+                well_fluorophore = well_data.get('fluorophore', '')
+                final_fluorophore = fluorophore if fluorophore else well_fluorophore
+                well_result.fluorophore = str(final_fluorophore) if final_fluorophore else None
+                
+                # Debug fluorophore assignment for control wells
+                if well_result.sample_name and any(control in well_result.sample_name.upper() for control in ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC']):
+                    print(f"[CONTROL FLUOR] {well_key}: sample='{well_result.sample_name}', final_fluorophore='{final_fluorophore}' (param={fluorophore}, data={well_fluorophore})")
                 
                 # Set threshold_value if present
                 threshold_value = well_data.get('threshold_value')
@@ -395,27 +418,9 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             db.session.flush()
             print(f"[DB DEBUG] Final commit done for {well_count} wells.")
             
-            # Mark channel as completed in completion tracking
-            ChannelCompletionStatus.mark_channel_completed(
-                experiment_pattern=base_pattern,
-                fluorophore=fluorophore,
-                session_id=session.id,
-                total_wells=total_wells,
-                good_curves=positive_wells,
-                success_rate=success_rate
-            )
-            print(f"Channel completion marked: {base_pattern} - {fluorophore} - Session {session.id}")
-            
         except Exception as commit_error:
             db.session.rollback()
             print(f"Forced commit error: {commit_error}")
-            
-            # Mark channel as failed if commit fails
-            ChannelCompletionStatus.mark_channel_failed(
-                experiment_pattern=base_pattern,
-                fluorophore=fluorophore,
-                error_message=str(commit_error)
-            )
             raise
         
         print(f"Individual channel session saved: {experiment_name} with {well_count} wells")
@@ -424,15 +429,6 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
     except Exception as e:
         db.session.rollback()
         print(f"Error saving individual channel session: {e}")
-        
-        # Mark channel as failed
-        if 'base_pattern' in locals() and 'fluorophore' in locals():
-            ChannelCompletionStatus.mark_channel_failed(
-                experiment_pattern=base_pattern,
-                fluorophore=fluorophore,
-                error_message=str(e)
-            )
-        
         return False
 
 class Base(DeclarativeBase):
@@ -540,15 +536,61 @@ def analyze_data():
                 results = process_csv_data(data)
                 print(f"Standard analysis completed for {len(data)} wells")
             
-            # Inject fluorophore information into individual well results
+            # Inject fluorophore information and ensure proper well_id structure for fresh load
             if 'individual_results' in results and fluorophore != 'Unknown':
+                print(f"[FRESH LOAD] Processing individual_results for {fluorophore}")
+                updated_individual_results = {}
+                
                 for well_key, well_data in results['individual_results'].items():
                     if isinstance(well_data, dict):
+                        # Ensure fluorophore is in well data
                         well_data['fluorophore'] = fluorophore
+                        
+                        # Ensure well_id is properly constructed with fluorophore suffix
+                        if not well_key.endswith(f'_{fluorophore}'):
+                            new_well_key = f"{well_key}_{fluorophore}"
+                            print(f"[FRESH LOAD] Updated well_id: {well_key} -> {new_well_key}")
+                        else:
+                            new_well_key = well_key
+                        
+                        # Ensure coordinate field is present (extract from well_id)
+                        if 'coordinate' not in well_data or not well_data['coordinate']:
+                            base_coordinate = new_well_key.split('_')[0] if '_' in new_well_key else new_well_key
+                            well_data['coordinate'] = base_coordinate
+                        
+                        # Set the well_id in the well data for consistency
+                        well_data['well_id'] = new_well_key
+                        
+                        # Debug control wells in fresh load
+                        sample_name = well_data.get('sample_name', '')
+                        if sample_name and any(control in sample_name.upper() for control in ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC']):
+                            print(f"[FRESH CONTROL] {new_well_key}: sample='{sample_name}', coord='{well_data.get('coordinate', '')}', fluor='{fluorophore}'")
+                        
+                        updated_individual_results[new_well_key] = well_data
+                
+                # Replace the original individual_results with updated structure
+                results['individual_results'] = updated_individual_results
+                print(f"[FRESH LOAD] Updated {len(updated_individual_results)} wells with proper well_id structure")
             
             if not results.get('success', False):
                 print(f"Analysis failed: {results.get('error', 'Unknown error')}")
                 return jsonify(results), 500
+            
+            # Debug the original results structure from analysis
+            print(f"[FRESH ANALYSIS] Original results structure:")
+            if 'individual_results' in results:
+                individual_results = results['individual_results']
+                print(f"[FRESH ANALYSIS] individual_results type: {type(individual_results)}")
+                if individual_results:
+                    first_key = next(iter(individual_results)) if isinstance(individual_results, dict) else None
+                    if first_key:
+                        first_well = individual_results[first_key]
+                        print(f"[FRESH ANALYSIS] First well_key: '{first_key}', well_data type: {type(first_well)}")
+                        if isinstance(first_well, dict):
+                            print(f"[FRESH ANALYSIS] First well fields: {list(first_well.keys())}")
+                            sample_name = first_well.get('sample_name', '')
+                            well_id_in_data = first_well.get('well_id', 'MISSING')
+                            print(f"[FRESH ANALYSIS] First well sample_name: '{sample_name}', well_id in data: '{well_id_in_data}'")
                 
             print(f"[ANALYZE] Analysis completed successfully")
         except Exception as analysis_error:
@@ -600,6 +642,21 @@ def analyze_data():
         # Include validation warnings in successful response
         if warnings:
             results['validation_warnings'] = warnings
+        
+        # Final debugging of results structure before sending to frontend
+        print(f"[FINAL FRESH] Results keys: {list(results.keys())}")
+        if 'individual_results' in results:
+            individual_results = results['individual_results']
+            print(f"[FINAL FRESH] individual_results has {len(individual_results)} wells")
+            # Sample a few wells to verify structure
+            sample_wells = list(individual_results.items())[:2]
+            for well_key, well_data in sample_wells:
+                if isinstance(well_data, dict):
+                    has_well_id = 'well_id' in well_data
+                    has_coordinate = 'coordinate' in well_data  
+                    has_fluorophore = 'fluorophore' in well_data
+                    sample_name = well_data.get('sample_name', '')
+                    print(f"[FINAL FRESH] {well_key}: well_id={has_well_id}, coordinate={has_coordinate}, fluorophore={has_fluorophore}, sample='{sample_name}'")
         
         print(f"[ANALYZE] Preparing JSON response...")
         # Ensure all numpy data types are converted to Python types for JSON serialization
@@ -669,6 +726,33 @@ def get_sessions():
                 for well in individual_results:
                     well_dict = well.to_dict() if hasattr(well, 'to_dict') else well
                     if isinstance(well_dict, dict) and 'well_id' in well_dict:
+                        # Ensure well_dict has all necessary fields for control grid (same as get_session_details)
+                        well_id = well_dict['well_id']
+                        
+                        # Extract coordinate from well_id if not present
+                        if 'coordinate' not in well_dict or not well_dict['coordinate']:
+                            base_coordinate = well_id.split('_')[0] if '_' in well_id else well_id
+                            well_dict['coordinate'] = base_coordinate
+                        
+                        # Ensure fluorophore is present
+                        if 'fluorophore' not in well_dict or not well_dict['fluorophore']:
+                            if '_' in well_id:
+                                potential_fluorophore = well_id.split('_')[-1]
+                                if potential_fluorophore in ['Cy5', 'FAM', 'HEX', 'Texas Red']:
+                                    well_dict['fluorophore'] = potential_fluorophore
+                        
+                        # Parse JSON fields that might be stored as strings in database
+                        json_fields = ['raw_cycles', 'raw_rfu', 'fitted_curve', 'fit_parameters', 'parameter_errors', 'anomalies']
+                        for field in json_fields:
+                            if field in well_dict and isinstance(well_dict[field], str):
+                                try:
+                                    well_dict[field] = json.loads(well_dict[field])
+                                except (json.JSONDecodeError, TypeError):
+                                    if field in ['anomalies']:
+                                        well_dict[field] = []
+                                    elif field in ['raw_cycles', 'raw_rfu', 'fitted_curve', 'fit_parameters', 'parameter_errors']:
+                                        well_dict[field] = []
+                        
                         results_dict[well_dict['well_id']] = well_dict
             session_dict['individual_results'] = results_dict
             sessions_data.append(session_dict)
@@ -685,15 +769,58 @@ def get_session_details(session_id):
     try:
         session = AnalysisSession.query.get_or_404(session_id)
         wells = WellResult.query.filter_by(session_id=session_id).all()
+        
+        print(f"[HISTORY LOAD] Loading session {session_id}: {session.filename}")
+        print(f"[HISTORY LOAD] Found {len(wells)} wells in database")
+        
         # Robustly handle both dict and list for wells
         if isinstance(wells, dict):
             results_dict = wells
         else:
             results_dict = {}
+            control_wells_found = 0
             for well in wells:
                 well_dict = well.to_dict() if hasattr(well, 'to_dict') else well
                 if isinstance(well_dict, dict) and 'well_id' in well_dict:
+                    # Ensure well_dict has all necessary fields for control grid
+                    well_id = well_dict['well_id']
+                    
+                    # Extract coordinate from well_id if not present (e.g., "A1_FAM" -> "A1")
+                    if 'coordinate' not in well_dict or not well_dict['coordinate']:
+                        base_coordinate = well_id.split('_')[0] if '_' in well_id else well_id
+                        well_dict['coordinate'] = base_coordinate
+                    
+                    # Ensure fluorophore is present (from well_id suffix if not in data)
+                    if 'fluorophore' not in well_dict or not well_dict['fluorophore']:
+                        if '_' in well_id:
+                            potential_fluorophore = well_id.split('_')[-1]
+                            if potential_fluorophore in ['Cy5', 'FAM', 'HEX', 'Texas Red']:
+                                well_dict['fluorophore'] = potential_fluorophore
+                    
+                    # Parse JSON fields that might be stored as strings in database
+                    json_fields = ['raw_cycles', 'raw_rfu', 'fitted_curve', 'fit_parameters', 'parameter_errors', 'anomalies']
+                    for field in json_fields:
+                        if field in well_dict and isinstance(well_dict[field], str):
+                            try:
+                                well_dict[field] = json.loads(well_dict[field])
+                            except (json.JSONDecodeError, TypeError):
+                                # If JSON parsing fails, keep as string or set to default
+                                if field in ['anomalies']:
+                                    well_dict[field] = []
+                                elif field in ['raw_cycles', 'raw_rfu', 'fitted_curve', 'fit_parameters', 'parameter_errors']:
+                                    well_dict[field] = []
+                    
+                    # Debug control wells during history load
+                    sample_name = well_dict.get('sample_name', '')
+                    if sample_name and any(control in sample_name.upper() for control in ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC']):
+                        control_wells_found += 1
+                        print(f"[HISTORY CONTROL] {well_dict['well_id']}: sample='{sample_name}', coord='{well_dict.get('coordinate', 'NONE')}', fluor='{well_dict.get('fluorophore', 'NONE')}'")
+                    
                     results_dict[well_dict['well_id']] = well_dict
+            
+            print(f"[HISTORY LOAD] Found {control_wells_found} control wells in loaded session")
+            print(f"[HISTORY LOAD] Sample well structure: {list(results_dict.keys())[:3] if results_dict else 'None'}")
+            
         return jsonify({
             'session': session.to_dict(),
             'wells': [well.to_dict() for well in wells],
@@ -746,6 +873,7 @@ def save_combined_session():
         # Calculate fluorophore-specific statistics for multi-fluorophore display
         fluorophore_breakdown = {}
         fluorophore_counts = {}
+        control_wells_by_fluorophore = {}
         
         for well_key, well_data in individual_results.items():
             if isinstance(well_data, dict):
@@ -754,8 +882,15 @@ def save_combined_session():
                 
                 if fluorophore not in fluorophore_breakdown:
                     fluorophore_breakdown[fluorophore] = {'total': 0, 'positive': 0}
+                    control_wells_by_fluorophore[fluorophore] = 0
                 
                 fluorophore_breakdown[fluorophore]['total'] += 1
+                
+                # Debug control wells in combined sessions
+                sample_name = well_data.get('sample_name', '')
+                if sample_name and any(control in sample_name.upper() for control in ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC']):
+                    control_wells_by_fluorophore[fluorophore] += 1
+                    print(f"[COMBINED CONTROL] {well_key}: sample='{sample_name}', fluorophore='{fluorophore}'")
                 
                 # Check if well is positive (amplitude > 500)
                 amplitude = well_data.get('amplitude', 0)
@@ -764,6 +899,10 @@ def save_combined_session():
                     
                 # Count wells per fluorophore for validation
                 fluorophore_counts[fluorophore] = fluorophore_counts.get(fluorophore, 0) + 1
+        
+        # Log control well distribution
+        for fluorophore, count in control_wells_by_fluorophore.items():
+            print(f"[COMBINED SESSION] {fluorophore}: {count} control wells out of {fluorophore_counts.get(fluorophore, 0)} total wells")
         
         # Calculate overall statistics and create pathogen breakdown display
         positive_wells = sum(breakdown['positive'] for breakdown in fluorophore_breakdown.values())
@@ -888,22 +1027,6 @@ def save_combined_session():
                 well_result.cycle_range = float(well_data.get('cycle_range', 0)) if well_data.get('cycle_range') is not None else None
                 
                 # JSON/text fields - ensure they are converted to JSON strings for database storage
-                # Helper function to safely serialize to JSON, avoiding double-encoding
-                def safe_json_dumps(value, default=None):
-                    if value is None:
-                        return None
-                    # If already a string, assume it's already JSON-encoded
-                    if isinstance(value, str):
-                        try:
-                            # Validate it's valid JSON
-                            json.loads(value)
-                            return value
-                        except (json.JSONDecodeError, TypeError):
-                            # If not valid JSON, treat as a raw string and encode it
-                            return json.dumps(value)
-                    # Otherwise, serialize the object/list to JSON
-                    return json.dumps(value if value is not None else default)
-                
                 well_result.fit_parameters = safe_json_dumps(well_data.get('fit_parameters'), [])
                 well_result.parameter_errors = safe_json_dumps(well_data.get('parameter_errors'), [])
                 well_result.fitted_curve = safe_json_dumps(well_data.get('fitted_curve'), [])
@@ -1090,76 +1213,6 @@ def not_found(error):
 def internal_error(error):
     return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/channels/processing-status/<experiment_pattern>', methods=['GET'])
-def get_channel_processing_status(experiment_pattern):
-    """Get processing status for all channels of an experiment (distinct from static validation)"""
-    try:
-        from models import ChannelCompletionStatus
-        
-        status = ChannelCompletionStatus.get_experiment_completion_status(experiment_pattern)
-        
-        return jsonify({
-            'success': True,
-            'experiment_pattern': experiment_pattern,
-            'processing_status': status
-        })
-        
-    except Exception as e:
-        print(f"Error getting channel processing status: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-@app.route('/channels/processing/poll', methods=['POST'])
-def poll_channel_processing():
-    """Poll for processing completion of specific channels (distinct from static validation)"""
-    try:
-        data = request.get_json()
-        experiment_pattern = data.get('experiment_pattern')
-        required_fluorophores = data.get('required_fluorophores', [])
-        
-        if not experiment_pattern or not required_fluorophores:
-            return jsonify({
-                'success': False,
-                'error': 'experiment_pattern and required_fluorophores are required'
-            }), 400
-        
-        from models import ChannelCompletionStatus
-        
-        # Get processing status for all required channels
-        channel_processing = {}
-        all_processed = True
-        any_failed = False
-        
-        for fluorophore in required_fluorophores:
-            channel = ChannelCompletionStatus.query.filter_by(
-                experiment_pattern=experiment_pattern,
-                fluorophore=fluorophore
-            ).first()
-            
-            if channel:
-                channel_processing[fluorophore] = channel.to_dict()
-                if channel.status != 'completed':
-                    all_processed = False
-                if channel.status == 'failed':
-                    any_failed = True
-            else:
-                channel_processing[fluorophore] = {'status': 'not_started'}
-                all_processed = False
-        
-        return jsonify({
-            'success': True,
-            'experiment_pattern': experiment_pattern,
-            'channels': channel_processing,
-            'all_processed': all_processed,
-            'any_failed': any_failed,
-            'ready_for_combination': all_processed and not any_failed
-        })
-        
-    except Exception as e:
-        print(f"Error polling channel processing: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+if __name__ == '__main__':
+    # Development server configuration
+    app.run(host='0.0.0.0', port=5002, debug=True)

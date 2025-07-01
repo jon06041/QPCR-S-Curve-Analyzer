@@ -1972,8 +1972,6 @@ tr:hover::before {
     margin-bottom: 15px;
     font-size: 1.2rem;
     font-weight: 600;
-    border-bottom: 2px solid #ecf0f1;
-    padding-bottom: 8px;
 }
 
 .fluorophore-stats {
@@ -2712,7 +2710,7 @@ tr:hover::before {
 
 .grid-cell {
     background: #f8f9fa;
-    border: 2px solid #dee2e6;
+       border: 2px solid #dee2e6;
     border-radius: 6px;
     padding: 8px 6px;
     text-align: center;
@@ -2964,5 +2962,270 @@ tr:hover::before {
     .channel-stats {
         flex-direction: column;
         gap: 5px;
+    }
+}
+
+/* Additional Channel Processing Status UI Styles */
+.channel-processing-container {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border: 2px solid #dee2e6;
+    border-radius: 12px;
+    padding: 24px;
+    margin: 20px 0;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.channel-processing-header {
+    text-align: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #dee2e6;
+}
+
+.channel-processing-header h3 {
+    margin: 0 0 15px 0;
+    color: #495057;
+    font-size: 1.4rem;
+    font-weight: 600;
+}
+
+.channel-overall-progress {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.progress-bar {
+    background: #e9ecef;
+    border-radius: 10px;
+    height: 20px;
+    width: 300px;
+    overflow: hidden;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.progress-fill {
+    background: linear-gradient(90deg, #28a745 0%, #20c997 100%);
+    height: 100%;
+    border-radius: 10px;
+    transition: width 0.3s ease;
+    position: relative;
+}
+
+.progress-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.3) 50%, transparent 100%);
+    animation: progress-shine 2s infinite;
+}
+
+@keyframes progress-shine {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+.progress-text {
+    font-weight: 600;
+    color: #495057;
+    font-size: 0.95rem;
+}
+
+.channel-status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin: 20px 0;
+}
+
+.channel-status-item {
+    background: white;
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    padding: 16px;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.channel-status-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.channel-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.channel-name {
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: #495057;
+}
+
+.channel-number {
+    background: #6c757d;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+.channel-progress {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.status-indicator {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    transition: all 0.3s ease;
+}
+
+.status-indicator.status-waiting {
+    background: #f8f9fa;
+    border: 2px solid #dee2e6;
+}
+
+.status-indicator.status-waiting::before {
+    content: '⏳';
+    font-size: 18px;
+}
+
+.status-indicator.status-processing {
+    background: linear-gradient(45deg, #007bff, #0056b3);
+    border: 2px solid #0056b3;
+    color: white;
+}
+
+.status-indicator.status-processing .status-spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid transparent;
+    border-top: 2px solid white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.status-indicator.status-completed {
+    background: linear-gradient(45deg, #28a745, #1e7e34);
+    border: 2px solid #1e7e34;
+    color: white;
+}
+
+.status-indicator.status-completed::before {
+    content: '✓';
+    font-size: 20px;
+    font-weight: bold;
+}
+
+.status-indicator.status-failed {
+    background: linear-gradient(45deg, #dc3545, #c82333);
+    border: 2px solid #c82333;
+    color: white;
+}
+
+.status-indicator.status-failed::before {
+    content: '✗';
+    font-size: 18px;
+    font-weight: bold;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.status-text {
+    font-weight: 600;
+    font-size: 1rem;
+    color: #495057;
+    flex: 1;
+}
+
+.channel-processing-footer {
+    text-align: center;
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 1px solid #dee2e6;
+}
+
+.processing-note {
+    color: #6c757d;
+    font-style: italic;
+    font-size: 0.9rem;
+}
+
+/* Mobile responsiveness for new status UI */
+@media (max-width: 768px) {
+    .channel-processing-container {
+        padding: 16px;
+        margin: 15px 0;
+    }
+    
+    .channel-overall-progress {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .progress-bar {
+        width: 100%;
+        max-width: 280px;
+    }
+    
+    .channel-status-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    
+    .channel-info {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .channel-progress {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    
+    .status-indicator {
+        width: 35px;
+        height: 35px;
+    }
+}
+
+@media (max-width: 480px) {
+    .channel-processing-header h3 {
+        font-size: 1.2rem;
+    }
+    
+    .progress-text {
+        font-size: 0.85rem;
+    }
+    
+    .channel-name {
+        font-size: 1rem;
+    }
+    
+    .status-text {
+        font-size: 0.9rem;
     }
 }
