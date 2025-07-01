@@ -914,6 +914,66 @@ body {
     }
 }
 
+.chart-controls {
+    background: white;
+    border-radius: 15px;
+    padding: 15px 20px;
+    margin-bottom: 15px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+}
+
+.scale-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.scale-toggle label {
+    font-weight: 600;
+    color: #2c3e50;
+    font-size: 0.9rem;
+}
+
+.toggle-btn {
+    display: flex;
+    background: #f8f9fa;
+    border: 2px solid #dee2e6;
+    border-radius: 25px;
+    padding: 4px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.toggle-btn:hover {
+    border-color: #3498db;
+}
+
+.toggle-option {
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    color: #6c757d;
+    cursor: pointer;
+    user-select: none;
+}
+
+.toggle-option.active {
+    background: #3498db;
+    color: white;
+    box-shadow: 0 2px 4px rgba(52, 152, 219, 0.3);
+}
+
+.toggle-option:not(.active):hover {
+    color: #495057;
+}
+
 .chart-container {
     margin-bottom: 30px;
     background: white;

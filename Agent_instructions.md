@@ -8,6 +8,7 @@ This document provides comprehensive instructions and findings from debugging an
 ✅ **Control Grid CSS**: COMPLETED - Fixed both duplicate CSS and grid layout structure
 ✅ **Tabbed Grid Layout**: COMPLETED - Grid layout within tabs now works correctly
 ✅ **Single-Channel Test Support**: COMPLETED - Added support for all single-channel tests
+🔄 **Chart.js Logarithmic Toggle**: IN PROGRESS - Created feature branch, implementing toggle UI
 
 ## Control Grid CSS Issue - RESOLVED
 
@@ -358,3 +359,58 @@ From analysis, the JavaScript expects these CSS classes:
 - `.valid`, `.invalid`, `.missing` - Validation state classes
 - `.pathogen-tab-headers` - Tab navigation
 - `.pathogen-tab-panel` - Tab content panels
+
+## Chart.js Logarithmic/Linear Toggle Feature
+
+### Current Implementation Status 🔄
+
+**Branch**: `feature/logarithmic-curve-toggle`
+
+### Requirements
+1. **UI Toggle Button**: Add toggle button to switch between logarithmic and linear y-axis scales
+2. **Chart.js Integration**: Utilize Chart.js built-in logarithmic scale support
+3. **Threshold Calculation**: Set threshold above 10x the Standard Deviation of amplification values in cycles 1-5, per channel
+4. **User Preference**: Remember user's scale preference during session
+
+### Chart.js Scale Configuration
+```javascript
+// Linear scale (current)
+scales: {
+    y: {
+        type: 'linear',
+        beginAtZero: true,
+        title: { display: true, text: 'Fluorescence' }
+    }
+}
+
+// Logarithmic scale (to implement)
+scales: {
+    y: {
+        type: 'logarithmic',
+        min: 0.1,  // Avoid log(0) issues
+        title: { display: true, text: 'Fluorescence (log)' }
+    }
+}
+```
+
+### Implementation Plan
+1. **Add Toggle UI**: Insert log/linear toggle button near chart display
+2. **Update Chart Configuration**: Modify `createChartConfiguration()` to accept scale type parameter
+3. **Implement Scale Switching**: Add function to update chart scale dynamically
+4. **Threshold Calculation**: 
+   - Calculate Std.Dev of cycles 1-5 per channel
+   - Set threshold = 10 × Std.Dev above baseline
+   - Display threshold line on chart
+5. **User Preference Storage**: Store scale preference in sessionStorage
+
+### Files to Modify
+- `static/script.js`: Chart configuration and toggle logic
+- `static/style.css`: Toggle button styling
+- `index.html`: Toggle button placement (if needed)
+
+### Testing Requirements
+- Toggle functionality works for both single and multi-channel displays
+- Logarithmic scale properly handles zero/negative values
+- Threshold lines display correctly on both scales
+- User preference persists during session
+- Mobile-responsive toggle button

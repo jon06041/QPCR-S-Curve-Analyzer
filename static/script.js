@@ -2196,55 +2196,15 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
     } else {
         console.log('[Chart.js][updateChart] No threshold annotation for this well. threshold_value:', wellResult ? wellResult.threshold_value : undefined);
     }
-    window.amplificationChart = new Chart(ctx, {
-        type: 'scatter',
-        data: { datasets: datasets },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            aspectRatio: 1.8,
-            plugins: {
-                title: {
-                    display: true,
-                    text: `qPCR Amplification Curve - ${wellId} (${fluorophore})`,
-                    font: { size: 16, weight: 'bold' }
-                },
-                legend: {
-                    display: true,
-                    position: 'top'
-                },
-                ...(annotation ? { annotation } : {})
-            },
-            scales: {
-                x: {
-                    title: { 
-                        display: true, 
-                        text: 'Cycle Number',
-                        font: { size: 14, weight: 'bold' }
-                    },
-                    grid: { color: 'rgba(0,0,0,0.1)' }
-                },
-                y: {
-                    title: { 
-                        display: true, 
-                        text: 'RFU (Relative Fluorescence Units)',
-                        font: { size: 14, weight: 'bold' }
-                    },
-                    grid: { color: 'rgba(0,0,0,0.1)' },
-                    min: function(context) {
-                        const data = context.chart.data.datasets[0].data;
-                        const minVal = Math.min(...data.map(point => point.y));
-                        return minVal - (minVal * 0.15);
-                    },
-                    max: function(context) {
-                        const data = context.chart.data.datasets[0].data;
-                        const maxVal = Math.max(...data.map(point => point.y));
-                        return maxVal + (maxVal * 0.15);
-                    }
-                }
-            }
-        }
-    });
+    
+    const chartConfig = createChartConfiguration(
+        'scatter', 
+        datasets, 
+        `qPCR Amplification Curve - ${wellId} (${fluorophore})`,
+        annotation
+    );
+    
+    window.amplificationChart = new Chart(ctx, chartConfig);
 }
 
 // Utility functions
@@ -7870,52 +7830,19 @@ function showAllCurves(selectedFluorophore) {
     } else {
         console.log('[Chart.js][showAllCurves] No threshold annotations. fluorThresholds:', fluorThresholds);
     }
-    window.amplificationChart = new Chart(ctx, {
-        type: 'line',
-        data: { datasets },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                title: {
-                    display: true,
-                    text: `All Curves - ${selectedFluorophore === 'all' ? 'All Fluorophores' : selectedFluorophore}`,
-                    font: { size: 16, weight: 'bold' }
-                },
-                legend: {
-                    display: false // Too many curves for legend
-                },
-                tooltip: {
-                    enabled: false // Disable tooltips for better performance with many curves
-                },
-                ...(annotation ? { annotation } : {})
-            },
-            scales: {
-                x: {
-                    type: 'linear',
-                    title: { display: true, text: 'Cycle Number', font: { size: 14 } },
-                    grid: { color: 'rgba(0,0,0,0.1)' }
-                },
-                y: {
-                    type: 'linear',
-                    title: { display: true, text: 'RFU', font: { size: 14 } },
-                    grid: { color: 'rgba(0,0,0,0.1)' }
-                }
-            },
-            interaction: {
-                intersect: false,
-                mode: 'index'
-            },
-            elements: {
-                point: {
-                    radius: 0
-                },
-                line: {
-                    tension: 0.1
-                }
-            }
-        }
-    });
+    
+    const chartConfig = createChartConfiguration(
+        'line', 
+        datasets, 
+        `All Curves - ${selectedFluorophore === 'all' ? 'All Fluorophores' : selectedFluorophore}`,
+        annotation
+    );
+    
+    // Override some options for multi-curve display
+    chartConfig.options.plugins.legend.display = false;
+    chartConfig.options.plugins.tooltip.enabled = false;
+    
+    window.amplificationChart = new Chart(ctx, chartConfig);
 }
 
 function showGoodCurves(selectedFluorophore) {
@@ -8336,6 +8263,310 @@ function getFluorophoreColor(fluorophore) {
         'Unknown': '#888888' // Gray
     };
     return colors[fluorophore] || colors['Unknown'];
+}
+
+// --- Threshold Calculation Functions ---
+function calculateChannelThreshold(cycles, rfu) {
+    if (!cycles || !rfu || cycles.length !== rfu.length || cycles.length < 5) {
+        console.warn('Insufficient data for threshold calculation');
+        return null;
+    }
+    
+    // Extract RFU values for cycles 1-5
+    const earlyRfuValues = [];
+    for (let i = 0; i < Math.min(5, cycles.length); i++) {
+        if (cycles[i] <= 5 && rfu[i] !== null && rfu[i] !== undefined) {
+            earlyRfuValues.push(rfu[i]);
+        }
+    }
+    
+    if (earlyRfuValues.length < 3) {
+        console.warn('Insufficient early cycle data for threshold calculation');
+        return null;
+    }
+    
+    // Calculate mean and standard deviation
+    const mean = earlyRfuValues.reduce((sum, val) => sum + val, 0) / earlyRfuValues.length;
+    const variance = earlyRfuValues.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / earlyRfuValues.length;
+    const stdDev = Math.sqrt(variance);
+    
+    // Threshold = baseline + 10 * standard deviation
+    const threshold = mean + (10 * stdDev);
+    
+    console.log(`Threshold calculation - Mean: ${mean.toFixed(3)}, StdDev: ${stdDev.toFixed(3)}, Threshold: ${threshold.toFixed(3)}`);
+    
+    return {
+        threshold: threshold,
+        baseline: mean,
+        stdDev: stdDev,
+        earlyRfuValues: earlyRfuValues
+    };
+}
+
+function calculateThresholdForWell(wellData) {
+    try {
+        const cycles = typeof wellData.raw_cycles === 'string' ? 
+            JSON.parse(wellData.raw_cycles) : wellData.raw_cycles;
+        const rfu = typeof wellData.raw_rfu === 'string' ? 
+            JSON.parse(wellData.raw_rfu) : wellData.raw_rfu;
+        
+        return calculateChannelThreshold(cycles, rfu);
+    } catch (error) {
+        console.error('Error calculating threshold for well:', error);
+        return null;
+    }
+}
+
+function updateThresholdAnnotations() {
+    if (!window.amplificationChart || !currentAnalysisResults) return;
+    
+    // Get current well or fluorophore being displayed
+    const selectedWell = document.getElementById('wellSelect')?.value;
+    const selectedFluorophore = document.getElementById('fluorophoreSelect')?.value;
+    
+    if (selectedWell && selectedWell !== 'all') {
+        // Single well view - calculate threshold for this specific well
+        const wellKey = Object.keys(currentAnalysisResults.individual_results || {})
+            .find(key => key.startsWith(selectedWell));
+        
+        if (wellKey) {
+            const wellData = currentAnalysisResults.individual_results[wellKey];
+            const thresholdData = calculateThresholdForWell(wellData);
+            
+            if (thresholdData) {
+                updateChartWithThreshold(thresholdData.threshold, wellData.fluorophore);
+            }
+        }
+    } else if (selectedFluorophore && selectedFluorophore !== 'all') {
+        // Fluorophore view - calculate average threshold for this fluorophore
+        const fluorophoreWells = Object.values(currentAnalysisResults.individual_results || {})
+            .filter(well => well.fluorophore === selectedFluorophore);
+        
+        const thresholds = fluorophoreWells
+            .map(well => calculateThresholdForWell(well))
+            .filter(t => t !== null)
+            .map(t => t.threshold);
+        
+        if (thresholds.length > 0) {
+            const avgThreshold = thresholds.reduce((sum, t) => sum + t, 0) / thresholds.length;
+            updateChartWithThreshold(avgThreshold, selectedFluorophore);
+        }
+    }
+}
+
+function updateChartWithThreshold(threshold, fluorophore) {
+    if (!window.amplificationChart) return;
+    
+    const annotation = {
+        annotations: {
+            thresholdLine: {
+                type: 'line',
+                yMin: threshold,
+                yMax: threshold,
+                borderColor: 'red',
+                borderWidth: 2,
+                borderDash: [5, 5],
+                label: {
+                    content: `Threshold: ${threshold.toFixed(2)}`,
+                    enabled: true,
+                    position: 'end',
+                    backgroundColor: 'rgba(255, 0, 0, 0.8)',
+                    color: 'white',
+                    font: { weight: 'bold' }
+                }
+            }
+        }
+    };
+    
+    // Update chart options with new annotation
+    window.amplificationChart.options.plugins.annotation = annotation;
+    window.amplificationChart.update('none');
+}
+
+// --- Chart Scale Toggle Functionality ---
+let currentChartScale = 'linear'; // Default to linear scale
+
+function initializeChartToggle() {
+    const toggleBtn = document.getElementById('scaleToggle');
+    if (!toggleBtn) return;
+    
+    // Initialize from sessionStorage if available
+    const savedScale = sessionStorage.getItem('qpcr_chart_scale');
+    if (savedScale && (savedScale === 'linear' || savedScale === 'logarithmic')) {
+        currentChartScale = savedScale;
+        updateToggleAppearance(currentChartScale);
+    }
+    
+    toggleBtn.addEventListener('click', function() {
+        // Toggle between linear and logarithmic
+        currentChartScale = currentChartScale === 'linear' ? 'logarithmic' : 'linear';
+        
+        // Save preference
+        sessionStorage.setItem('qpcr_chart_scale', currentChartScale);
+        
+        // Update toggle appearance
+        updateToggleAppearance(currentChartScale);
+        
+        // Update chart if it exists
+        updateChartScale();
+    });
+}
+
+function updateToggleAppearance(scale) {
+    const toggleBtn = document.getElementById('scaleToggle');
+    if (!toggleBtn) return;
+    
+    const linearOption = toggleBtn.querySelector('.toggle-option:first-child');
+    const logOption = toggleBtn.querySelector('.toggle-option:last-child');
+    
+    if (scale === 'linear') {
+        linearOption.classList.add('active');
+        logOption.classList.remove('active');
+        toggleBtn.setAttribute('data-scale', 'linear');
+    } else {
+        linearOption.classList.remove('active');
+        logOption.classList.add('active');
+        toggleBtn.setAttribute('data-scale', 'logarithmic');
+    }
+}
+
+function updateChartScale() {
+    if (!window.amplificationChart) return;
+    
+    const yScale = window.amplificationChart.options.scales.y;
+    
+    if (currentChartScale === 'logarithmic') {
+        yScale.type = 'logarithmic';
+        yScale.min = 0.1; // Avoid log(0) issues
+        yScale.title.text = 'RFU (log scale)';
+        delete yScale.max; // Let Chart.js handle max for log scale
+        delete yScale.beginAtZero;
+    } else {
+        yScale.type = 'linear';
+        yScale.title.text = 'RFU (Relative Fluorescence Units)';
+        delete yScale.min; // Reset to let Chart.js calculate
+        delete yScale.max;
+        yScale.beginAtZero = false;
+        
+        // Restore dynamic min/max for linear scale
+        yScale.min = function(context) {
+            const data = context.chart.data.datasets[0].data;
+            if (!data || data.length === 0) return 0;
+            const minVal = Math.min(...data.map(point => point.y));
+            return minVal - (minVal * 0.15);
+        };
+        yScale.max = function(context) {
+            const data = context.chart.data.datasets[0].data;
+            if (!data || data.length === 0) return 100;
+            const maxVal = Math.max(...data.map(point => point.y));
+            return maxVal + (maxVal * 0.15);
+        };
+    }
+    
+    window.amplificationChart.update('none'); // No animation for smoother transition
+}
+
+function createChartConfiguration(chartType, datasets, title, annotation = null) {
+    const scaleConfig = getScaleConfiguration();
+    
+    return {
+        type: chartType,
+        data: { datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            aspectRatio: 1.8,
+            plugins: {
+                title: {
+                    display: true,
+                    text: title,
+                    font: { size: 16, weight: 'bold' }
+                },
+                legend: {
+                    display: chartType !== 'line' || datasets.length <= 10,
+                    position: 'top'
+                },
+                tooltip: {
+                    enabled: datasets.length <= 20 // Disable for performance with many curves
+                },
+                ...(annotation ? { annotation } : {})
+            },
+            scales: {
+                x: {
+                    type: 'linear',
+                    title: { 
+                        display: true, 
+                        text: 'Cycle Number',
+                        font: { size: 14, weight: 'bold' }
+                    },
+                    grid: { color: 'rgba(0,0,0,0.1)' }
+                },
+                y: scaleConfig
+            },
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            },
+            elements: {
+                point: {
+                    radius: chartType === 'line' && datasets.length > 10 ? 0 : 3
+                },
+                line: {
+                    tension: 0.1
+                }
+            }
+        }
+    };
+}
+
+function getScaleConfiguration() {
+    const baseConfig = {
+        title: { 
+            display: true, 
+            font: { size: 14, weight: 'bold' }
+        },
+        grid: { color: 'rgba(0,0,0,0.1)' }
+    };
+    
+    if (currentChartScale === 'logarithmic') {
+        return {
+            ...baseConfig,
+            type: 'logarithmic',
+            min: 0.1,
+            title: { 
+                ...baseConfig.title,
+                text: 'RFU (log scale)'
+            }
+        };
+    } else {
+        return {
+            ...baseConfig,
+            type: 'linear',
+            title: { 
+                ...baseConfig.title,
+                text: 'RFU (Relative Fluorescence Units)'
+            },
+            min: function(context) {
+                const data = context.chart.data.datasets[0]?.data;
+                if (!data || data.length === 0) return 0;
+                const minVal = Math.min(...data.map(point => point.y));
+                return minVal - (minVal * 0.15);
+            },
+            max: function(context) {
+                const data = context.chart.data.datasets[0]?.data;
+                if (!data || data.length === 0) return 100;
+                const maxVal = Math.max(...data.map(point => point.y));
+                return maxVal + (maxVal * 0.15);
+            }
+        };
+    }
+}
+
+// Initialize chart toggle when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeChartToggle);
+} else {
+    initializeChartToggle();
 }
 
 // Modal functionality
