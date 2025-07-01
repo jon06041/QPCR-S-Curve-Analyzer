@@ -9,8 +9,8 @@
     <!-- Chart.js Annotation Plugin v4.x (compatible with Chart.js v4) -->
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.1.0/dist/chartjs-plugin-annotation.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-    <script src="/static/pathogen_library.js?v=1751379109"></script>
-    <link rel="stylesheet" href="/static/style.css?v=1751379109">
+    <script src="/static/pathogen_library.js?v=1751381539"></script>
+    <link rel="stylesheet" href="/static/style.css?v=1751381539">
 </head>
 <body>
     <div class="container">
@@ -282,8 +282,19 @@
     </div>
 
     
-    <script src="/static/pathogen_grids_data.js?v=1735174001"></script>
+    <script src="/static/pathogen_grids_data.js?v=1751381539"></script>
     <script>
+    // Force CSS reload to bypass cache
+    document.addEventListener('DOMContentLoaded', function() {
+        const link = document.querySelector('link[rel="stylesheet"]');
+        if (link) {
+            const newLink = link.cloneNode();
+            newLink.href = link.href.split('?')[0] + '?v=' + Date.now();
+            link.parentNode.insertBefore(newLink, link.nextSibling);
+            link.remove();
+        }
+    });
+    
     // Only one Clear All History logic should exist
     function clearAllHistory() {
         if (confirm('Are you sure you want to clear all analysis history? This will delete both local and server history and cannot be undone.')) {
@@ -333,6 +344,6 @@
         }
     });
     </script>
-    <script src="/static/script.js?v=1735177421"></script>
+    <script src="/static/script.js?v=1751382261"></script>
 </body>
 </html>

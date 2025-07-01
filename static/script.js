@@ -107,14 +107,59 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
         });
         
         if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(`Backend analysis failed: ${errorData.error || 'Unknown error'}`);
+            let errorMessage = `HTTP ${response.status}`;
+            try {
+                // Clone the response to read it multiple times if needed
+                const responseClone = response.clone();
+                const errorData = await responseClone.json();
+                errorMessage = errorData.error || errorData.message || errorMessage;
+            } catch (jsonError) {
+                // If we can't parse JSON, try to get the text from the original response
+                try {
+                    const errorText = await response.text();
+                    if (errorText) {
+                        errorMessage = `${errorMessage}: ${errorText}`;
+                    }
+                } catch (textError) {
+                    console.error(`❌ SINGLE-CHANNEL - Could not read error response for ${fluorophore}:`, textError);
+                }
+            }
+            throw new Error(`Backend analysis failed for ${fluorophore}: ${errorMessage}`);
         }
         
-        const result = await response.json();
+        let result;
+        try {
+            result = await response.json();
+        } catch (jsonError) {
+            console.error(`❌ SINGLE-CHANNEL - Failed to parse JSON response for ${fluorophore}:`, jsonError);
+            throw new Error(`Invalid JSON response from backend for ${fluorophore}: ${jsonError.message}`);
+        }
         
         if (!result || !result.individual_results) {
             throw new Error(`Analysis returned invalid results for ${fluorophore}`);
+        }
+        
+        // 🔍 DATA-FORMAT-CONVERSION: Handle backend string to frontend object conversion
+        // The backend stores individual_results as strings in the database, but frontend needs objects
+        console.log(`🔍 SINGLE-CHANNEL - Converting data format for ${fluorophore}`, {
+            individualResultsType: typeof result.individual_results,
+            isString: typeof result.individual_results === 'string'
+        });
+        
+        // Convert individual_results from string to object if needed
+        if (typeof result.individual_results === 'string') {
+            try {
+                result.individual_results = JSON.parse(result.individual_results);
+                console.log(`🔍 SINGLE-CHANNEL - Successfully parsed individual_results string to object for ${fluorophore}`);
+            } catch (parseError) {
+                console.error(`❌ SINGLE-CHANNEL - Failed to parse individual_results for ${fluorophore}:`, parseError);
+                throw new Error(`Invalid JSON format in individual_results for ${fluorophore}`);
+            }
+        }
+        
+        // Ensure we have a valid object
+        if (!result.individual_results || typeof result.individual_results !== 'object') {
+            throw new Error(`Individual results is not a valid object for ${fluorophore}`);
         }
         
         console.log(`🔍 SINGLE-CHANNEL - ${fluorophore} analysis complete. Wells: ${Object.keys(result.individual_results).length}`);
@@ -1010,8 +1055,24 @@ async function performAnalysis() {
             
             await displayAnalysisResults(singleResult);
         } else {
+            // Filter out null/failed results before combining
+            const validResults = {};
+            Object.keys(allResults).forEach(fluorophore => {
+                if (allResults[fluorophore] && allResults[fluorophore].individual_results) {
+                    validResults[fluorophore] = allResults[fluorophore];
+                } else {
+                    console.warn(`🔍 COMBINATION-FILTER - Excluding failed/null result for ${fluorophore}`);
+                }
+            });
+            
+            console.log(`🔍 COMBINATION-FILTER - Filtered ${Object.keys(allResults).length} channels to ${Object.keys(validResults).length} valid channels`);
+            
+            if (Object.keys(validResults).length === 0) {
+                throw new Error('No valid channel results available for combination');
+            }
+            
             // Combine all fluorophore results for multi-fluorophore display (SQL-integrated)
-            const combinedResults = combineMultiFluorophoreResultsSQL(allResults);
+            const combinedResults = combineMultiFluorophoreResultsSQL(validResults);
             analysisResults = combinedResults;
             
             // 🔍 POST-COMBINE DEBUG: Check if combinedResults are complete
@@ -2599,6 +2660,13 @@ function combineMultiFluorophoreResults(allResults) {
 
 function combineMultiFluorophoreResultsSQL(allResults) {
     console.log('=== COMBINING SQL-INTEGRATED MULTI-FLUOROPHORE RESULTS ===');
+    
+    // Validate input
+    if (!allResults || typeof allResults !== 'object') {
+        console.error('🔍 COMBINE-ERROR - Invalid allResults input:', allResults);
+        return { individual_results: {}, fluorophore_count: 0 };
+    }
+    
     const fluorophores = Object.keys(allResults);
     
     console.log('🔍 COMBINE-DEBUG - Input analysis:', {
@@ -2624,7 +2692,19 @@ function combineMultiFluorophoreResultsSQL(allResults) {
         return { individual_results: {}, fluorophore_count: 0 };
     }
     
-    const firstResult = allResults[fluorophores[0]];
+    // Find first valid result for baseline properties
+    let firstResult = null;
+    for (const fluorophore of fluorophores) {
+        if (allResults[fluorophore] && allResults[fluorophore].individual_results) {
+            firstResult = allResults[fluorophore];
+            break;
+        }
+    }
+    
+    if (!firstResult) {
+        console.error('🔍 COMBINE-ERROR - No valid results found in any fluorophore');
+        return { individual_results: {}, fluorophore_count: 0 };
+    }
     
     console.log('SQL-integrated fluorophores:', fluorophores);
     
@@ -2641,6 +2721,12 @@ function combineMultiFluorophoreResultsSQL(allResults) {
     
     fluorophores.forEach(fluorophore => {
         const results = allResults[fluorophore];
+        
+        // Validate results for this fluorophore
+        if (!results) {
+            console.warn(`🔍 COMBINE-WARN - No results for ${fluorophore}, skipping`);
+            return;
+        }
         
         console.log(`🔍 COMBINE-LOOP - Processing ${fluorophore}:`, {
             hasResults: !!results,

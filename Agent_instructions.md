@@ -7,16 +7,28 @@ This document provides comprehensive instructions and findings from debugging an
 ✅ **Multi-fluorophore processing**: COMPLETED - Sequential processing, error handling, threshold preservation
 ✅ **Control Grid CSS**: COMPLETED - Fixed both duplicate CSS and grid layout structure
 ✅ **Tabbed Grid Layout**: COMPLETED - Grid layout within tabs now works correctly
+✅ **Single-Channel Test Support**: COMPLETED - Added support for all single-channel tests
 
 ## Control Grid CSS Issue - RESOLVED
 
 ### Root Cause Identified and Fixed
-The control grids for multichannel runs involve **tabbed interface** (one tab per fluorophore/pathogen), and the issue was **two different grid systems** being used inconsistently:
+The issue was **incomplete test code support** in the grid system:
 
-1. **Primary System** (`.control-grid-table`): Proper CSS Grid with Set 1,2,3,4 as columns and H,M,L,NTC as rows
-2. **Fallback System** (`.pathogen-control-grid`): Vertical stacked layout where each set was a separate section
+1. **Primary Issue**: Only 4 test codes (`BVAB`, `BVPanelPCR3`, `Cglab`, `Ngon`) were supported
+2. **Missing Tests**: Single-channel tests (`Calb`, `Ctrach`, `Tvag`, `Mgen`, `Upar`, `Uure`) fell back to broken universal grid
+3. **Fresh vs History**: History loads worked because they used cached grid data, fresh loads failed due to missing test support
 
-**Expected Layout:** ✅ NOW WORKING
+### Solution Implemented ✅
+✅ **Added Single-Channel Support**: All single-channel tests now supported in `showPathogenGridsWithData()`
+✅ **Enhanced Debugging**: Added comprehensive logging to identify test code detection issues
+✅ **Cache Busting**: Updated cache-busting parameter to force CSS reload
+✅ **Unified Grid Structure**: Both primary and fallback systems use same `.control-grid-table` structure
+
+**Supported Test Codes Now:**
+- **Multi-channel**: `BVAB`, `BVPanelPCR3`
+- **Single-channel**: `Cglab`, `Ngon`, `Calb`, `Ctrach`, `Tvag`, `Mgen`, `Upar`, `Uure`
+
+**Expected Layout:** ✅ NOW WORKING FOR ALL TESTS
 ```
 | Control | Set 1 | Set 2 | Set 3 | Set 4 |
 |---------|-------|-------|-------|-------|
@@ -25,11 +37,6 @@ The control grids for multichannel runs involve **tabbed interface** (one tab pe
 |    L    |  L1   |  L2   |  L3   |  L4   |
 |   NTC   | NTC1  | NTC2  | NTC3  | NTC4  |
 ```
-
-### Solution Implemented
-✅ **Fixed Fallback Grid Function**: Updated `createSinglePathogenControlGridFromFallback()` to use same `.control-grid-table` structure as primary system
-✅ **Unified Grid Structure**: Both systems now generate identical HTML structure
-✅ **Proper CSS Grid**: Single CSS system handles all grid displays with correct column/row layout
 
 ### Previous Problem Also Solved
 Successfully identified and removed **two duplicate CSS sections** for control grids:
