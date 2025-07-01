@@ -1,7 +1,21 @@
-# Agent Instructions: Multi-Fluorophore qPCR Analysis Debugging
+# Agent Instructions: Multi-Fluorophore qPCR Analysis Debugging & Control Grid CSS Issues
 
 ## Overview
 This document provides comprehensive instructions and findings from debugging and improving the multi-fluorophore (multi-channel) qPCR analysis workflow. The main goal was to ensure all channels (Cy5, FAM, HEX, Texas Red) are processed, combined, and displayed correctly.
+
+## CURRENT STATUS (July 1, 2025)
+✅ **Multi-fluorophore processing**: COMPLETED - Sequential processing, error handling, threshold preservation
+🚨 **Control Grid CSS**: ACTIVE ISSUE - Duplicate CSS styling sections, unclear which is original
+
+## Current CSS Styling Issue
+**Problem**: Control grids have 2 CSS styling sections created and we need to determine which is the original or create new unified styling.
+
+**Impact**: Control grid display may be inconsistent or conflicting between different CSS rules.
+
+**Next Steps**: 
+1. Identify which CSS section is the original control grid styling
+2. Consolidate or replace with unified CSS styling
+3. Test control grid display after CSS changes
 
 ## Key Issues Identified and Resolved
 
@@ -160,3 +174,151 @@ git checkout working-branch
 ---
 
 *This document should be updated whenever significant changes are made to the multi-fluorophore processing workflow.*
+
+## HISTORICAL CONTEXT: Multichannel Processing Issue Analysis
+
+### Original Problem Summary (June 30, 2025)
+
+We had timing/completion issues with multichannel qPCR processing that affected both fresh loads and historical data retrieval. The current implementation didn't properly wait for all processes to complete before moving to the next step.
+
+### Test Types Architecture
+1. **Single Channel (Single Fluorophore)**: Tests 1 pathogen
+   - Uses 1 of the 4 available machine channels for that specific test
+   - Channel-pathogen mapping: 1:1 for the single pathogen being tested
+
+2. **Multichannel (Multiple Fluorophores)**: Tests multiple pathogens simultaneously
+   - **Machine Limitation**: Up to 4 channels (4 fluorophores) maximum per PCR machine
+   - **Channel-Pathogen Mapping**: Each channel is grouped with a specific pathogen in that test
+   - **Available Channels**: Same 4 machine channels, but within a test those channels are used with specific pathogens
+   - **Sample Capacity**: Up to 384 wells per channel (368 samples + 16 controls = 384 total)
+   - **Control Wells**: H, M, L, NTC controls used 4 times each = 16 control wells per channel
+   - **Actual Sample Count**: 368 samples per channel (384 - 16 controls, or less for partial runs)
+   - **Channel Definitions**: Each channel defined in `pathogen_library.js`
+
+### Original Issues Identified
+
+#### 1. Threshold Display Problems
+- **Symptom**: Thresholds sometimes didn't show when loading from history
+- **Suspected Cause**: Process didn't finish completely before moving to next step
+- **Impact**: Charts displayed without proper threshold lines
+
+#### 2. Control Grid Creation Issues
+- **Symptom**: 
+  - Fresh loads: Control grids had trouble displaying initially
+  - History loads: All grids showed up properly on reopen
+- **Details**: 
+  - Multichannel tests create different tabs (up to 16 controls per pathogen/channel)
+  - Control types: H (High), M (Medium), L (Low), NTC (No Template Control)
+  - **Control Usage**: Each control type used 4 times = 16 control wells per channel
+  - **Well Distribution**: 368 samples + 16 controls = 384 total wells per channel (or less for partial runs)
+  - Grid layout varies by pathogen/channel
+
+#### 3. Partial Channel Loading
+- **Current Behavior**: Multichannel tests could load partial channel data
+- **Database Behavior**: Partial results combine in DB, so full data available on reload
+- **Problem**: Initial display incomplete, required history reload to see everything
+
+### Root Cause Analysis
+The core issue was **lack of proper transaction-like processing**:
+- Processes ran asynchronously without proper completion waiting
+- No guarantee that one channel completed before starting the next
+- No final consolidation step that waited for all channels
+- Frontend initiated combination while backend still processing individual channels
+
+### Key Discovery: Control Extraction System Was Never Broken
+The original control extraction functions were working correctly:
+- ✅ `extractRealControlCoordinates()` - Works correctly with proper well data
+- ✅ `isControlSample()` - Functions properly for control detection
+- ✅ `createPathogenControlGrids()` - Real grid system (not dummy/fallback)
+
+**The issue was data structure incompatibility, not the control extraction logic.**
+- ❌ **Old Problem**: Fresh loads had incomplete well_id structure (missing fluorophore suffix)
+- ✅ **Phase 2 Fix**: Well objects now have proper structure for both fresh and history loads
+- ✅ **Result**: Original control extraction + fixed well objects = Working solution
+
+### Implementation Phases Completed
+
+#### ✅ Phase 1: Backend Channel Processing Tracking
+- **Added**: `ChannelCompletionStatus` model in `models.py`
+- **Features**: Tracked processing state, timestamps, validation flags
+- **Methods**: `mark_channel_started()`, `mark_channel_completed()`, `mark_channel_failed()`
+- **Backend API**: `/channels/processing-status/` and `/channels/processing/poll` endpoints
+- **Frontend**: Channel status polling and progress display
+
+#### ✅ Phase 2: Control Grid Fix & Polling Removal
+**COMPLETED (July 1, 2025)**: Fixed control grid display issues and removed unnecessary polling
+
+**Issues Fixed**:
+1. **Control Grid Display**: 
+   - ✅ Fixed fresh load well_id structure to match history loads
+   - ✅ Ensured proper well_id construction with fluorophore suffixes (e.g., "A1_FAM")
+   - ✅ Added coordinate field extraction from well_id for control grid
+   - ✅ Enhanced debugging for control sample detection
+
+2. **Data Structure Consistency**:
+   - ✅ Made fresh loads return same structure as history loads
+   - ✅ Proper JSON field parsing for database-loaded sessions
+   - ✅ Ensured fluorophore and coordinate fields are always present
+
+3. **Polling Removal**:
+   - ✅ Removed unnecessary channel completion tracking
+   - ✅ Cleaned up ChannelCompletionStatus polling endpoints
+   - ✅ Simplified backend to focus on core functionality
+
+#### ✅ Phase 3: Frontend Sequential Processing (COMPLETED)
+**Current Status**: Replaced parallel channel processing with sequential queue
+
+**Implementation Details**:
+- **Old Problem**: Parallel processing caused race conditions
+```javascript
+// PROBLEMATIC: Parallel processing
+fluorophores.forEach(async fluorophore => {
+    const result = await analyzeData(data, fluorophore); // All start at once!
+});
+```
+
+- **New Solution**: Sequential processing ensures proper completion
+```javascript
+// FIXED: Sequential processing  
+for (const fluorophore of fluorophores) {
+    await processChannelSequentially(fluorophore);
+}
+```
+
+## CONTROL GRID CSS STYLING ISSUE - SOLUTION
+
+### Problem Identified
+Found **two duplicate CSS sections** for control grids:
+
+1. **Section 1 (Lines 1112-1140)**: `.pathogen-control-grid` - Uses flexbox layout with fixed height (220px)
+2. **Section 2 (Lines 2651-2680)**: `.pathogen-control-grid` - Uses CSS Grid layout with dynamic columns
+
+### CSS Conflict Analysis
+- **First Section** (1112): Designed for fluorophore stat card style grids
+- **Second Section** (2651): Designed for dynamic grid layout with proper header structure
+- **JavaScript Expectation**: Uses classes like `grid-header`, `grid-corner`, `control-cell` which match Section 2
+
+### Recommended Solution
+**Keep Section 2 (lines 2651+) and remove Section 1 (lines 1112-1140)**
+
+**Reasoning**: 
+- Section 2 has proper CSS Grid structure matching JavaScript expectations
+- Includes dynamic column sizing with `data-sets` attributes
+- Has comprehensive cell styling (valid/invalid/missing states)
+- Supports the tabbed interface structure used by the pathogen grids
+
+### Implementation Steps
+1. Remove the first `.pathogen-control-grid` section (lines 1112-1140)
+2. Keep the second section which has complete grid styling
+3. Test control grid display after cleanup
+4. Ensure both fresh uploads and history loads work correctly
+
+### CSS Classes Used by JavaScript
+From analysis, the JavaScript expects these CSS classes:
+- `.pathogen-control-grid` - Main grid container
+- `.grid-header` - Column headers
+- `.grid-corner` - Empty corner cell
+- `.control-cell` - Individual control cells
+- `.valid`, `.invalid`, `.missing` - Validation state classes
+- `.pathogen-tab-headers` - Tab navigation
+- `.pathogen-tab-panel` - Tab content panels

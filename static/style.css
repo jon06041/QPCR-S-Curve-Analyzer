@@ -1109,26 +1109,7 @@ body {
     border-color: #ffeaa7;
 }
 
-.pathogen-control-grid {
-    background: rgba(255, 255, 255, 0.9);
-    border-radius: 8px;
-    padding: 1px;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-    border-left: 3px solid #3498db;
-    height: 220px;
-    box-sizing: border-box;
-}
-
-.pathogen-control-grid h5 {
-    font-weight: 700;
-    font-size: 0.75rem;
-    color: #000000;
-    margin: 0 0 2px 0;
-    text-align: center;
-    padding: 2px;
-    background: rgba(52, 152, 219, 0.1);
-    border-radius: 6px;
-}
+/* REMOVED DUPLICATE: .pathogen-control-grid section moved to unified location at line 2651+ */
 
 .pathogen-grid {
     display: grid;
@@ -1974,14 +1955,7 @@ tr:hover::before {
 
 
 
-.pathogen-control-grid h5 {
-    margin: 0 0 6px 0;
-    color: #2c3e50;
-    font-size: 12px;
-    font-weight: 600;
-    text-align: center;
-    flex-shrink: 0;
-}
+/* REMOVED DUPLICATE: .pathogen-control-grid h5 section - unified in main section */
 
 .fluorophore-name {
     font-weight: 700;
