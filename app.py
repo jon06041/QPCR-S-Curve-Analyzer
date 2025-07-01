@@ -134,14 +134,18 @@ def validate_file_pattern_consistency(filenames):
     return True, ""
 
 def save_individual_channel_session(filename, results, fluorophore, summary):
-    """Save individual channel session to database for channel tracking"""
+    """Save individual channel session to database for channel tracking with completion status"""
     try:
-        from models import AnalysisSession, WellResult
+        from models import AnalysisSession, WellResult, ChannelCompletionStatus
         
-        # Use complete filename as experiment name for individual channels
-        experiment_name = filename
+        # Extract experiment pattern and test code for completion tracking
+        base_pattern = extract_base_pattern(filename)
+        test_code = base_pattern.split('_')[0]
+        if test_code.startswith('Ac'):
+            test_code = test_code[2:]  # Remove "Ac" prefix
         
         print(f"DEBUG: Individual channel session - filename: {filename}, fluorophore: {fluorophore}")
+        print(f"DEBUG: Completion tracking - base_pattern: {base_pattern}, test_code: {test_code}")
         
         # Enhanced fluorophore detection from filename if not provided
         if not fluorophore:
@@ -157,8 +161,23 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             
             print(f"DEBUG: Enhanced fluorophore detection result: {fluorophore}")
         
+        # Get pathogen target for completion tracking
+        pathogen_target = get_pathogen_target(test_code, fluorophore)
+        
+        # Mark channel as started if not already tracked
+        ChannelCompletionStatus.mark_channel_started(
+            experiment_pattern=base_pattern,
+            fluorophore=fluorophore,
+            test_code=test_code,
+            pathogen_target=pathogen_target
+        )
+        
         # Calculate statistics from results
         individual_results = results.get('individual_results', {})
+        total_wells = len(individual_results)
+        
+        # Use complete filename as experiment name for individual channels
+        experiment_name = filename
         total_wells = len(individual_results)
         
         # Count positive wells (POS classification: amplitude > 500 and no anomalies)
@@ -375,9 +394,28 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             db.session.commit()
             db.session.flush()
             print(f"[DB DEBUG] Final commit done for {well_count} wells.")
+            
+            # Mark channel as completed in completion tracking
+            ChannelCompletionStatus.mark_channel_completed(
+                experiment_pattern=base_pattern,
+                fluorophore=fluorophore,
+                session_id=session.id,
+                total_wells=total_wells,
+                good_curves=positive_wells,
+                success_rate=success_rate
+            )
+            print(f"Channel completion marked: {base_pattern} - {fluorophore} - Session {session.id}")
+            
         except Exception as commit_error:
             db.session.rollback()
             print(f"Forced commit error: {commit_error}")
+            
+            # Mark channel as failed if commit fails
+            ChannelCompletionStatus.mark_channel_failed(
+                experiment_pattern=base_pattern,
+                fluorophore=fluorophore,
+                error_message=str(commit_error)
+            )
             raise
         
         print(f"Individual channel session saved: {experiment_name} with {well_count} wells")
@@ -386,6 +424,15 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
     except Exception as e:
         db.session.rollback()
         print(f"Error saving individual channel session: {e}")
+        
+        # Mark channel as failed
+        if 'base_pattern' in locals() and 'fluorophore' in locals():
+            ChannelCompletionStatus.mark_channel_failed(
+                experiment_pattern=base_pattern,
+                fluorophore=fluorophore,
+                error_message=str(e)
+            )
+        
         return False
 
 class Base(DeclarativeBase):
@@ -1043,12 +1090,76 @@ def not_found(error):
 def internal_error(error):
     return jsonify({'error': 'Internal server error'}), 500
 
-if __name__ == '__main__':
-    # Ensure static directory exists
-    if not os.path.exists('static'):
-        os.makedirs('static')
-    
-    # Run the Flask app (Railway deployment compatible)
-    import os
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+@app.route('/channels/processing-status/<experiment_pattern>', methods=['GET'])
+def get_channel_processing_status(experiment_pattern):
+    """Get processing status for all channels of an experiment (distinct from static validation)"""
+    try:
+        from models import ChannelCompletionStatus
+        
+        status = ChannelCompletionStatus.get_experiment_completion_status(experiment_pattern)
+        
+        return jsonify({
+            'success': True,
+            'experiment_pattern': experiment_pattern,
+            'processing_status': status
+        })
+        
+    except Exception as e:
+        print(f"Error getting channel processing status: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/channels/processing/poll', methods=['POST'])
+def poll_channel_processing():
+    """Poll for processing completion of specific channels (distinct from static validation)"""
+    try:
+        data = request.get_json()
+        experiment_pattern = data.get('experiment_pattern')
+        required_fluorophores = data.get('required_fluorophores', [])
+        
+        if not experiment_pattern or not required_fluorophores:
+            return jsonify({
+                'success': False,
+                'error': 'experiment_pattern and required_fluorophores are required'
+            }), 400
+        
+        from models import ChannelCompletionStatus
+        
+        # Get processing status for all required channels
+        channel_processing = {}
+        all_processed = True
+        any_failed = False
+        
+        for fluorophore in required_fluorophores:
+            channel = ChannelCompletionStatus.query.filter_by(
+                experiment_pattern=experiment_pattern,
+                fluorophore=fluorophore
+            ).first()
+            
+            if channel:
+                channel_processing[fluorophore] = channel.to_dict()
+                if channel.status != 'completed':
+                    all_processed = False
+                if channel.status == 'failed':
+                    any_failed = True
+            else:
+                channel_processing[fluorophore] = {'status': 'not_started'}
+                all_processed = False
+        
+        return jsonify({
+            'success': True,
+            'experiment_pattern': experiment_pattern,
+            'channels': channel_processing,
+            'all_processed': all_processed,
+            'any_failed': any_failed,
+            'ready_for_combination': all_processed and not any_failed
+        })
+        
+    except Exception as e:
+        print(f"Error polling channel processing: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500

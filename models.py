@@ -222,3 +222,164 @@ class ExperimentStatistics(db.Model):
             db.session.rollback()
             print(f"Error creating/updating experiment statistics: {e}")
             return False
+
+class ChannelCompletionStatus(db.Model):
+    """Track completion status of individual channels in multichannel processing"""
+    __tablename__ = 'channel_completion_status'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    experiment_pattern = db.Column(db.String(255), nullable=False)  # e.g., "AcBVAB_2578825_CFX367393"
+    fluorophore = db.Column(db.String(20), nullable=False)  # e.g., "Cy5", "FAM", "HEX", "Texas Red"
+    test_code = db.Column(db.String(50), nullable=False)  # e.g., "BVAB"
+    pathogen_target = db.Column(db.String(100))  # e.g., "BVAB3"
+    
+    # Processing status
+    status = db.Column(db.String(20), nullable=False, default='pending')  # pending, processing, completed, failed
+    session_id = db.Column(db.Integer, db.ForeignKey('analysis_sessions.id'))  # Link to completed session
+    
+    # Timestamps
+    started_at = db.Column(db.DateTime, default=datetime.utcnow)
+    completed_at = db.Column(db.DateTime)
+    
+    # Processing details
+    total_wells = db.Column(db.Integer)
+    good_curves = db.Column(db.Integer)
+    success_rate = db.Column(db.Float)
+    error_message = db.Column(db.Text)  # Store error details if failed
+    
+    # JSON data integrity flags
+    json_data_validated = db.Column(db.Boolean, default=False)
+    threshold_data_ready = db.Column(db.Boolean, default=False)
+    control_grid_data_ready = db.Column(db.Boolean, default=False)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'experiment_pattern': self.experiment_pattern,
+            'fluorophore': self.fluorophore,
+            'test_code': self.test_code,
+            'pathogen_target': self.pathogen_target,
+            'status': self.status,
+            'session_id': self.session_id,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'total_wells': self.total_wells,
+            'good_curves': self.good_curves,
+            'success_rate': self.success_rate,
+            'error_message': self.error_message,
+            'json_data_validated': self.json_data_validated,
+            'threshold_data_ready': self.threshold_data_ready,
+            'control_grid_data_ready': self.control_grid_data_ready
+        }
+    
+    @classmethod
+    def get_experiment_completion_status(cls, experiment_pattern):
+        """Get completion status for all channels of an experiment"""
+        channels = cls.query.filter_by(experiment_pattern=experiment_pattern).all()
+        return {
+            'channels': [channel.to_dict() for channel in channels],
+            'total_channels': len(channels),
+            'completed_channels': len([c for c in channels if c.status == 'completed']),
+            'failed_channels': len([c for c in channels if c.status == 'failed']),
+            'is_complete': all(c.status == 'completed' for c in channels) and len(channels) > 0
+        }
+    
+    @classmethod
+    def mark_channel_started(cls, experiment_pattern, fluorophore, test_code, pathogen_target=None):
+        """Mark a channel as started processing"""
+        try:
+            # Check if already exists
+            existing = cls.query.filter_by(
+                experiment_pattern=experiment_pattern,
+                fluorophore=fluorophore
+            ).first()
+            
+            if existing:
+                # Update existing record
+                existing.status = 'processing'
+                existing.started_at = datetime.utcnow()
+                existing.test_code = test_code
+                existing.pathogen_target = pathogen_target
+                existing.error_message = None
+            else:
+                # Create new record
+                new_channel = cls(
+                    experiment_pattern=experiment_pattern,
+                    fluorophore=fluorophore,
+                    test_code=test_code,
+                    pathogen_target=pathogen_target,
+                    status='processing'
+                )
+                db.session.add(new_channel)
+            
+            db.session.commit()
+            return True
+            
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error marking channel started: {e}")
+            return False
+    
+    @classmethod
+    def mark_channel_completed(cls, experiment_pattern, fluorophore, session_id, 
+                              total_wells=None, good_curves=None, success_rate=None):
+        """Mark a channel as completed with validation flags"""
+        try:
+            channel = cls.query.filter_by(
+                experiment_pattern=experiment_pattern,
+                fluorophore=fluorophore
+            ).first()
+            
+            if not channel:
+                print(f"Channel not found: {experiment_pattern} - {fluorophore}")
+                return False
+            
+            # Update completion status
+            channel.status = 'completed'
+            channel.completed_at = datetime.utcnow()
+            channel.session_id = session_id
+            channel.total_wells = total_wells
+            channel.good_curves = good_curves
+            channel.success_rate = success_rate
+            
+            # Validate JSON data integrity
+            if session_id:
+                from app import db as app_db
+                session = AnalysisSession.query.get(session_id)
+                if session and session.well_results:
+                    channel.json_data_validated = True
+                    channel.threshold_data_ready = True
+                    channel.control_grid_data_ready = True
+            
+            db.session.commit()
+            return True
+            
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error marking channel completed: {e}")
+            return False
+    
+    @classmethod
+    def mark_channel_failed(cls, experiment_pattern, fluorophore, error_message):
+        """Mark a channel as failed"""
+        try:
+            channel = cls.query.filter_by(
+                experiment_pattern=experiment_pattern,
+                fluorophore=fluorophore
+            ).first()
+            
+            if not channel:
+                print(f"Channel not found: {experiment_pattern} - {fluorophore}")
+                return False
+            
+            channel.status = 'failed'
+            channel.completed_at = datetime.utcnow()
+            channel.error_message = error_message
+            
+            db.session.commit()
+            return True
+            
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error marking channel failed: {e}")
+            return False
