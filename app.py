@@ -1362,6 +1362,30 @@ def not_found(error):
 def internal_error(error):
     return jsonify({'error': 'Internal server error'}), 500
 
+# Simple delete endpoint for testing
+@app.route('/sessions/<int:session_id>/simple-delete', methods=['DELETE'])
+def simple_delete_session(session_id):
+    """Simple delete without foreign key constraints for testing"""
+    try:
+        # Don't enable foreign key constraints for this endpoint
+        session = AnalysisSession.query.get(session_id)
+        if not session:
+            return jsonify({'error': f'Session {session_id} not found'}), 404
+        
+        print(f"[SIMPLE DELETE] Deleting session {session_id}: {session.filename}")
+        
+        # Just delete the session - let cascade handle the wells if configured
+        db.session.delete(session)
+        db.session.commit()
+        
+        print(f"[SIMPLE DELETE] Session {session_id} deleted successfully")
+        return jsonify({'message': f'Session {session_id} deleted successfully (simple mode)'})
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"[SIMPLE DELETE ERROR] {e}")
+        return jsonify({'error': f'Simple delete failed: {str(e)}'}), 500
+
 if __name__ == '__main__':
     # Production and development server configuration
     port = int(os.environ.get('PORT', 5002))  # Use Railway's PORT or default to 5002 for dev
