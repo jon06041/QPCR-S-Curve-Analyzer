@@ -7783,7 +7783,7 @@ function updateControlGridWithRealCoordinates(controlSets) {
     createPathogenSpecificGrids(controlSets);
 }
 
-/* TEST 3: COMMENTED OUT - createPathogenSpecificGrids (Major duplicate system)
+
 
 function createPathogenSpecificGrids(controlSets) {
     console.log('🔍 PATHOGEN GRIDS - Creating pathogen-specific tabbed grids');
@@ -7859,9 +7859,6 @@ function createPathogenSpecificGrids(controlSets) {
     console.log('🔍 PATHOGEN GRIDS - Set container display to block');
     console.log('🔍 PATHOGEN GRIDS - Container final HTML length:', pathogenGridsContainer.innerHTML.length);
 }
-
-function createPathogenGrid(pathogenName, pathogenControls) {
-END TEST 3 COMMENT */
 
 function createPathogenGrid(pathogenName, pathogenControls) {
     console.log(`🔍 PATHOGEN GRID - Creating grid for ${pathogenName}`);
