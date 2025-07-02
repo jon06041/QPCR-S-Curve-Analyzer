@@ -1220,12 +1220,28 @@ def get_experiment_statistics():
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
-    return jsonify({
-        'status': 'healthy',
-        'message': 'qPCR S-Curve Analyzer with Database',
-        'version': '2.1.0-database'
-    })
+    """Health check endpoint for Railway deployment"""
+    try:
+        # Test database connection
+        with app.app_context():
+            db.session.execute('SELECT 1')
+        
+        return jsonify({
+            'status': 'healthy',
+            'message': 'qPCR S-Curve Analyzer with Database',
+            'version': '2.1.0-database',
+            'database': 'connected',
+            'port': os.environ.get('PORT', '5002'),
+            'environment': os.environ.get('FLASK_ENV', 'development')
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'message': 'Database connection failed',
+            'error': str(e),
+            'port': os.environ.get('PORT', '5002'),
+            'environment': os.environ.get('FLASK_ENV', 'development')
+        }), 503
 
 @app.errorhandler(404)
 def not_found(error):
@@ -1236,5 +1252,7 @@ def internal_error(error):
     return jsonify({'error': 'Internal server error'}), 500
 
 if __name__ == '__main__':
-    # Development server configuration
-    app.run(host='0.0.0.0', port=5002, debug=True)
+    # Production and development server configuration
+    port = int(os.environ.get('PORT', 5002))  # Use Railway's PORT or default to 5002 for dev
+    debug = os.environ.get('FLASK_ENV') != 'production'  # Disable debug in production
+    app.run(host='0.0.0.0', port=port, debug=debug)

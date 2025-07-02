@@ -783,8 +783,10 @@ const scaleDescription = document.getElementById('scaleDescription');
 const scalePresetsContainer = document.getElementById('scalePresetsContainer');
 
 // --- Advanced Threshold Calculation ---
+// --- Enhanced Per-Channel Threshold Calculation (ALL WELLS BASED) ---
+// This function calculates thresholds using ALL wells for each channel, not just the displayed chart
 function calculateChannelThreshold(channel, scale) {
-    console.log(`🔍 THRESHOLD-CALC - Calculating ${scale} threshold for channel: ${channel}`);
+    console.log(`🔍 THRESHOLD-CALC - Calculating ${scale} threshold for channel: ${channel} using ALL wells`);
     
     // Multiple null checks for robustness
     if (!currentAnalysisResults) {
@@ -802,7 +804,7 @@ function calculateChannelThreshold(channel, scale) {
         return scale === 'log' ? 10 : 100;
     }
     
-    // Get all wells for this channel (by fluorophore)
+    // Get ALL wells for this channel (by fluorophore) - CRITICAL: This uses ALL wells, not just displayed ones
     const channelWells = Object.keys(currentAnalysisResults.individual_results)
         .map(wellKey => currentAnalysisResults.individual_results[wellKey])
         .filter(well => well != null && well.fluorophore === channel); // Filter by fluorophore property
@@ -812,7 +814,7 @@ function calculateChannelThreshold(channel, scale) {
         return scale === 'log' ? 10 : 100;
     }
     
-    console.log(`🔍 THRESHOLD-CALC - Found ${channelWells.length} wells for channel ${channel}`);
+    console.log(`🔍 THRESHOLD-CALC - Found ${channelWells.length} wells for channel ${channel} (using ALL wells in dataset)`);
     
     if (scale === 'log') {
         return calculateLogThreshold(channelWells, channel);
@@ -1253,11 +1255,14 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
             }
             
         } catch (networkError) {
-            // If backend is not available, use mock data for testing
-            console.warn(`⚠️ SINGLE-CHANNEL - Backend not available for ${fluorophore}, using mock data:`, networkError.message);
-            console.log(`🔧 MOCK-MODE - Generating mock analysis results for ${fluorophore}`);
+            // If backend is not available, throw error instead of using mock data
+            console.error(`❌ SINGLE-CHANNEL - Backend not available for ${fluorophore}:`, networkError.message);
+            throw new Error(`Backend connection failed for ${fluorophore}: ${networkError.message}`);
             
-            result = createMockAnalysisResponse(fluorophore);
+            // COMMENTED OUT: Mock data was interfering with real channel analysis
+            // console.warn(`⚠️ SINGLE-CHANNEL - Backend not available for ${fluorophore}, using mock data:`, networkError.message);
+            // console.log(`🔧 MOCK-MODE - Generating mock analysis results for ${fluorophore}`);
+            // result = createMockAnalysisResponse(fluorophore);
         }
         
         // 🔍 ROBUST-NULL-CHECK: Enhanced result validation
@@ -7811,15 +7816,15 @@ function createPathogenSpecificGrids(controlSets) {
     
     // Create tab navigation (without title per user request)
     const tabNav = document.createElement('div');
-    tabNav.className = 'pathogen-tabs';
+    tabNav.className = 'pathogen-tabs-container';
     console.log('🔍 PATHOGEN GRIDS - Created tab navigation');
     
     const tabButtons = document.createElement('div');
-    tabButtons.className = 'tab-buttons';
+    tabButtons.className = 'pathogen-tab-headers';
     
     // Create tab content container
     const tabContent = document.createElement('div');
-    tabContent.className = 'tab-content';
+    tabContent.className = 'pathogen-tab-content';
     console.log('🔍 PATHOGEN GRIDS - Created tab content container');
     
     // Create tabs for each pathogen found in the data
@@ -7829,7 +7834,7 @@ function createPathogenSpecificGrids(controlSets) {
         
         // Create tab button
         const tabButton = document.createElement('button');
-        tabButton.className = `tab-button ${index === 0 ? 'active' : ''}`;
+        tabButton.className = `pathogen-tab-header ${index === 0 ? 'active' : ''}`;
         tabButton.textContent = pathogenName;
         tabButton.onclick = () => showPathogenTab(pathogenName);
         tabButtons.appendChild(tabButton);
@@ -7837,7 +7842,7 @@ function createPathogenSpecificGrids(controlSets) {
         
         // Create tab panel with 4x4 grid
         const tabPanel = document.createElement('div');
-        tabPanel.className = `tab-panel ${index === 0 ? 'active' : ''}`;
+        tabPanel.className = `pathogen-tab-panel ${index === 0 ? 'active' : ''}`;
         tabPanel.id = `tab-${pathogenName}`;
         
         // Create 4x4 grid for this pathogen
@@ -7848,9 +7853,10 @@ function createPathogenSpecificGrids(controlSets) {
         tabContent.appendChild(tabPanel);
     });
     
+    // Assemble the tab structure properly
     tabNav.appendChild(tabButtons);
+    tabNav.appendChild(tabContent);
     pathogenGridsContainer.appendChild(tabNav);
-    pathogenGridsContainer.appendChild(tabContent);
     console.log('🔍 PATHOGEN GRIDS - Added navigation and content to container');
     console.log('🔍 PATHOGEN GRIDS - Total tabs created:', Object.keys(controlSets).length);
     
@@ -7937,28 +7943,38 @@ function createPathogenGrid(pathogenName, pathogenControls) {
 }
 
 function showPathogenTab(pathogenName) {
+    console.log(`🔍 TAB-SWITCH - Switching to pathogen tab: ${pathogenName}`);
+    
     // Hide all tab panels
-    document.querySelectorAll('.tab-panel').forEach(panel => {
+    document.querySelectorAll('.pathogen-tab-panel').forEach(panel => {
         panel.classList.remove('active');
+        console.log(`🔍 TAB-SWITCH - Hid panel: ${panel.id}`);
     });
     
     // Remove active class from all tab buttons
-    document.querySelectorAll('.tab-button').forEach(button => {
+    document.querySelectorAll('.pathogen-tab-header').forEach(button => {
         button.classList.remove('active');
+        console.log(`🔍 TAB-SWITCH - Deactivated button: ${button.textContent}`);
     });
     
     // Show selected tab panel
     const targetPanel = document.getElementById(`tab-${pathogenName}`);
     if (targetPanel) {
         targetPanel.classList.add('active');
+        console.log(`🔍 TAB-SWITCH - Activated panel: ${targetPanel.id}`);
+    } else {
+        console.error(`🔍 TAB-SWITCH - Panel not found: tab-${pathogenName}`);
     }
     
     // Activate selected tab button
-    document.querySelectorAll('.tab-button').forEach(button => {
+    document.querySelectorAll('.pathogen-tab-header').forEach(button => {
         if (button.textContent === pathogenName) {
             button.classList.add('active');
+            console.log(`🔍 TAB-SWITCH - Activated button: ${button.textContent}`);
         }
     });
+    
+    console.log(`🔍 TAB-SWITCH - Tab switch to ${pathogenName} completed`);
 }
 
 // Helper function to extract test name from experiment pattern
