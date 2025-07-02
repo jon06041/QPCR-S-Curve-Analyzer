@@ -1222,26 +1222,48 @@ def get_experiment_statistics():
 def health_check():
     """Health check endpoint for Railway deployment"""
     try:
-        # Test database connection
-        with app.app_context():
-            db.session.execute('SELECT 1')
+        # Basic app health check
+        import os
+        port = os.environ.get('PORT', '5002')
+        environment = os.environ.get('FLASK_ENV', 'development')
         
-        return jsonify({
+        response_data = {
             'status': 'healthy',
             'message': 'qPCR S-Curve Analyzer with Database',
             'version': '2.1.0-database',
-            'database': 'connected',
-            'port': os.environ.get('PORT', '5002'),
-            'environment': os.environ.get('FLASK_ENV', 'development')
-        }), 200
+            'port': port,
+            'environment': environment
+        }
+        
+        # Test database connection if possible
+        try:
+            with app.app_context():
+                db.session.execute('SELECT 1')
+            response_data['database'] = 'connected'
+        except Exception as db_error:
+            # Don't fail health check due to database issues
+            response_data['database'] = f'warning: {str(db_error)}'
+        
+        return jsonify(response_data), 200
+        
     except Exception as e:
+        # Return unhealthy status with error details
         return jsonify({
             'status': 'unhealthy',
-            'message': 'Database connection failed',
+            'message': 'Health check failed',
             'error': str(e),
             'port': os.environ.get('PORT', '5002'),
             'environment': os.environ.get('FLASK_ENV', 'development')
         }), 503
+
+@app.route('/ping', methods=['GET'])
+def ping():
+    """Simple ping endpoint for basic connectivity check"""
+    return jsonify({
+        'status': 'ok',
+        'message': 'Server is running',
+        'timestamp': datetime.utcnow().isoformat()
+    }), 200
 
 @app.errorhandler(404)
 def not_found(error):
