@@ -1095,14 +1095,20 @@ def delete_all_sessions():
         
         # Alternative approach: Delete well results first, then sessions
         print("[DEBUG] Deleting all well results first...")
-        WellResult.query.delete()
+        num_wells_deleted = WellResult.query.delete()
+        print(f"[DEBUG] Deleted {num_wells_deleted} well results")
         
         print("[DEBUG] Deleting all sessions...")
-        AnalysisSession.query.delete()
+        num_sessions_deleted = AnalysisSession.query.delete()
+        print(f"[DEBUG] Deleted {num_sessions_deleted} sessions")
         
         db.session.commit()
         print(f"[API] Successfully deleted all {num_sessions} sessions and their well results.")
-        return jsonify({'message': f'All {num_sessions} sessions deleted successfully'})
+        return jsonify({
+            'message': f'All {num_sessions} sessions deleted successfully',
+            'sessions_deleted': num_sessions_deleted,
+            'wells_deleted': num_wells_deleted
+        })
     except Exception as e:
         db.session.rollback()
         import traceback
@@ -1128,20 +1134,103 @@ def delete_session(session_id):
         
         # Delete well results first, then session
         print(f"[DEBUG] Deleting {well_count} well results for session {session_id}...")
-        WellResult.query.filter_by(session_id=session_id).delete()
+        num_wells_deleted = WellResult.query.filter_by(session_id=session_id).delete()
+        print(f"[DEBUG] Actually deleted {num_wells_deleted} well results")
         
         print(f"[DEBUG] Deleting session {session_id}...")
         db.session.delete(session)
         db.session.commit()
         
         print(f"[API] Successfully deleted session {session_id} and its {well_count} well results.")
-        return jsonify({'message': f'Session {session_id} deleted successfully'})
+        return jsonify({
+            'message': f'Session {session_id} deleted successfully',
+            'wells_deleted': num_wells_deleted
+        })
     except Exception as e:
         db.session.rollback()
         import traceback
         tb = traceback.format_exc()
         print(f"[ERROR] Exception deleting session {session_id}: {e}\nTraceback:\n{tb}")
         return jsonify({'error': f'Failed to delete session: {str(e)}'}), 500
+
+# Alternative delete endpoint with enhanced error handling
+@app.route('/sessions/<int:session_id>/force-delete', methods=['DELETE'])
+def force_delete_session(session_id):
+    """Force delete a session with enhanced error handling"""
+    try:
+        # Check if session exists first
+        session = AnalysisSession.query.get(session_id)
+        if not session:
+            return jsonify({'error': f'Session {session_id} not found'}), 404
+        
+        print(f"[FORCE DELETE] Starting force delete for session {session_id}: {session.filename}")
+        
+        # Get initial counts
+        initial_well_count = WellResult.query.filter_by(session_id=session_id).count()
+        print(f"[FORCE DELETE] Found {initial_well_count} wells to delete")
+        
+        # Try multiple deletion strategies
+        wells_deleted = 0
+        
+        # Strategy 1: Delete wells in batches
+        try:
+            batch_size = 50
+            while True:
+                wells_batch = WellResult.query.filter_by(session_id=session_id).limit(batch_size).all()
+                if not wells_batch:
+                    break
+                
+                for well in wells_batch:
+                    db.session.delete(well)
+                    wells_deleted += 1
+                
+                db.session.commit()
+                print(f"[FORCE DELETE] Deleted batch of {len(wells_batch)} wells")
+            
+            print(f"[FORCE DELETE] Deleted {wells_deleted} wells total")
+            
+        except Exception as wells_error:
+            print(f"[FORCE DELETE] Wells deletion failed: {wells_error}")
+            db.session.rollback()
+            
+            # Strategy 2: Raw SQL delete
+            try:
+                from sqlalchemy import text as sql_text
+                result = db.session.execute(
+                    sql_text('DELETE FROM well_results WHERE session_id = :session_id'),
+                    {'session_id': session_id}
+                )
+                wells_deleted = result.rowcount
+                print(f"[FORCE DELETE] Raw SQL deleted {wells_deleted} wells")
+                db.session.commit()
+            except Exception as sql_error:
+                print(f"[FORCE DELETE] Raw SQL deletion also failed: {sql_error}")
+                db.session.rollback()
+                return jsonify({'error': f'Could not delete wells: {str(sql_error)}'}), 500
+        
+        # Delete the session
+        try:
+            db.session.delete(session)
+            db.session.commit()
+            print(f"[FORCE DELETE] Successfully deleted session {session_id}")
+            
+            return jsonify({
+                'message': f'Session {session_id} force deleted successfully',
+                'wells_deleted': wells_deleted,
+                'initial_well_count': initial_well_count
+            })
+            
+        except Exception as session_error:
+            print(f"[FORCE DELETE] Session deletion failed: {session_error}")
+            db.session.rollback()
+            return jsonify({'error': f'Could not delete session: {str(session_error)}'}), 500
+            
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[FORCE DELETE ERROR] {e}\nTraceback:\n{tb}")
+        return jsonify({'error': f'Force delete failed: {str(e)}'}), 500
 
 @app.route('/experiments/statistics', methods=['POST'])
 def save_experiment_statistics():
