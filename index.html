@@ -97,22 +97,19 @@
                 </div>
             </div>
 
-            <div class="chart-controls">
-                <div class="scale-controls">
-                    <!-- Single row: All controls on one line -->
+            <div class="chart-container">
+                <canvas id="amplificationChart"></canvas>
+            </div>
+
+            <div class="chart-post-controls">
+                <div class="chart-controls-content">
+                    <!-- All controls in single row below chart -->
                     <div class="controls-row-1">
                         <div class="scale-mode">
                             <label for="scaleToggle">Y-Axis:</label>
                             <button class="toggle-btn" id="scaleToggle" data-scale="linear">
                                 <span class="toggle-option active">Linear</span>
                                 <span class="toggle-option">Log</span>
-                            </button>
-                        </div>
-                        <div class="baseline-flattening" id="baselineFlatteningContainer">
-                            <label for="baselineToggle">Baseline:</label>
-                            <button class="toggle-btn" id="baselineToggle" data-enabled="false" title="CFX Manager 3.1 style: Flatten non-S-curves only, preserve positive amplification">
-                                <span class="toggle-option active">Baseline Off</span>
-                                <span class="toggle-option">Baseline CFX Style</span>
                             </button>
                         </div>
                         <div class="scale-presets" id="scalePresetsContainer">
@@ -131,12 +128,15 @@
                                 <span class="slider-value" id="scaleMultiplier">1.0x</span>
                             </div>
                         </div>
+                        <div class="baseline-flattening" id="baselineFlatteningContainer">
+                            <label for="baselineToggle">Baseline:</label>
+                            <button class="toggle-btn" id="baselineToggle" data-enabled="false" title="CFX Manager 3.1 style: Flatten non-S-curves only, preserve positive amplification">
+                                <span class="toggle-option active">Off</span>
+                                <span class="toggle-option">ON</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
-            </div>
-
-            <div class="chart-container">
-                <canvas id="amplificationChart"></canvas>
             </div>
 
             <div class="results-sections-container">

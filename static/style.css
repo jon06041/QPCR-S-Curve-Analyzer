@@ -3334,3 +3334,50 @@ tr:hover::before {
 .slider-label {
     font-weight: 500;
 }
+
+/* Chart post-controls (below chart) */
+.chart-post-controls {
+    background: white;
+    border-radius: 15px;
+    padding: 15px 20px;
+    margin-top: 15px;
+    margin-bottom: 15px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.chart-controls-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+}
+
+/* Reuse existing controls-row-1 styling for the moved controls */
+.chart-post-controls .controls-row-1 {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.chart-post-controls .scale-mode, 
+.chart-post-controls .baseline-flattening, 
+.chart-post-controls .scale-presets, 
+.chart-post-controls .scale-range {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.chart-post-controls .scale-mode label, 
+.chart-post-controls .baseline-flattening label, 
+.chart-post-controls .scale-presets label, 
+.chart-post-controls .scale-range label {
+    font-weight: 600;
+    color: #2c3e50;
+    white-space: nowrap;
+}

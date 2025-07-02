@@ -11,6 +11,21 @@
 ✅ **Session Management**: COMPLETED - Scale preferences and thresholds persist correctly
 ✅ **Compact UI**: COMPLETED - Scale controls now fit on 1-2 lines with improved layout
 ✅ **Branch Management**: COMPLETED - Successfully merged feature/logarithmic-curve-toggle into fix/css-styling
+✅ **Threshold Scale Slider Fix**: COMPLETED - Fixed slider to only affect chart view (y-axis scaling), not threshold values used for analysis
+✅ **Chart Controls Layout**: COMPLETED - Moved all chart controls (Y-Axis, Threshold, Scale, Baseline) below the chart for better UX
+
+### LATEST CHANGES (July 2, 2025)
+**Threshold Scale Slider Fix**:
+- Fixed critical issue where scale slider was changing actual threshold values used for analysis
+- Renamed `currentThresholdMultiplier` to `currentScaleMultiplier` to clarify purpose
+- Slider now only affects chart y-axis view range, preserving actual threshold values
+- Updated session storage keys and removed multiplier from threshold annotations
+
+**Chart Controls Repositioning**:
+- Moved all chart controls from above the chart to below the chart
+- Improved user experience by placing controls where users can see immediate visual effects
+- Controls now include: Y-Axis (Linear/Log), Threshold presets, Scale slider, and Baseline toggle
+- Cleaner chart presentation with uncluttered display area
 
 ## READY FOR NEXT PHASES
 
@@ -697,7 +712,7 @@ function updateSingleChannelThreshold(fluorophore) { /* Implementation for singl
 #### Critical Next Steps (Priority Order):
 1. **FIX SYNTAX ERROR**: Find and close unclosed brace in script.js around line 1604
 2. **Test Basic Loading**: Ensure script.js loads without errors
-3. **Test Threshold Display**: Run `python3 app.py` on port 5002 and test threshold lines
+3. **Test Threshold Display**: Run `python app.py` on port 5002 and test threshold lines
 4. **Verify Channel Objects**: Ensure channels passed as objects with proper structure
 5. **Complete Mathematical Calculations**: Test log/linear threshold algorithms
 

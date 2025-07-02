@@ -3,8 +3,8 @@
 let channelThresholds = {};
 // Store current scale mode: 'linear' or 'log'
 let currentScaleMode = 'linear';
-// Store current threshold multiplier (slider value)
-let currentThresholdMultiplier = 1.0;
+// Store current scale multiplier (slider value) - affects chart view only, not threshold values
+let currentScaleMultiplier = 1.0;
 
 // Function to get current scale mode
 function getCurrentScaleMode() {
@@ -581,7 +581,7 @@ function initializeChannelThresholds() {
 }
 
 /**
- * Get the current threshold for a channel and scale, applying the slider multiplier
+ * Get the current threshold for a channel and scale (NO multiplier applied)
  */
 function getCurrentChannelThreshold(channel, scale = null) {
     if (!scale) scale = currentScaleMode;
@@ -604,17 +604,13 @@ function getCurrentChannelThreshold(channel, scale = null) {
     
     const baseThreshold = window.stableChannelThresholds[channel][scale];
     
-    // Apply slider multiplier
-    if (scale === 'linear') {
-        return baseThreshold * currentThresholdMultiplier;
-    } else {
-        // For log scale, multiplier adjusts the minimum visible range, not threshold
-        return baseThreshold;
-    }
+    // Return the base threshold WITHOUT any multiplier
+    // The scale multiplier only affects chart view, not threshold values
+    return baseThreshold;
 }
 
 /**
- * Update all chart threshold annotations when scale or multiplier changes
+ * Update all chart threshold annotations when scale changes (multiplier only affects view)
  */
 function updateAllChannelThresholds() {
     console.log('🔍 THRESHOLD - Updating all channel thresholds');
@@ -970,7 +966,7 @@ function loadChannelThresholds() {
 function updateSliderUI() {
     // Always show slider for both scales
     if (scaleRangeLabel) scaleRangeLabel.textContent = currentScaleMode === 'log' ? 'Log Range:' : 'Linear Range:';
-    if (scaleMultiplierLabel) scaleMultiplierLabel.textContent = currentThresholdMultiplier.toFixed(2) + 'x';
+    if (scaleMultiplierLabel) scaleMultiplierLabel.textContent = currentScaleMultiplier.toFixed(2) + 'x';
     if (scaleDescription) scaleDescription.textContent = currentScaleMode === 'log' ? 'Adjust log threshold' : 'Adjust linear threshold';
     
     // Sync toggle button state with current scale mode
@@ -994,52 +990,46 @@ function syncToggleButtonState() {
 }
 
 function onSliderChange(e) {
-    currentThresholdMultiplier = parseFloat(e.target.value);
+    currentScaleMultiplier = parseFloat(e.target.value);
     
     // Save to session storage
-    sessionStorage.setItem('qpcr_threshold_multiplier', currentThresholdMultiplier);
+    sessionStorage.setItem('qpcr_scale_multiplier', currentScaleMultiplier);
     
     updateSliderUI();
     
-    // Update chart scale and thresholds
+    // Update chart scale configuration (view only, not threshold values)
     if (window.amplificationChart) {
         // Update the chart scale configuration
         const newScaleConfig = getScaleConfiguration();
         window.amplificationChart.options.scales.y = newScaleConfig;
         
-        // Update threshold annotations
-        updateChartThresholds();
-        
-        // Force chart update with new scale
+        // Force chart update with new scale (no threshold update needed)
         window.amplificationChart.update('none');
         
-        console.log(`🔍 SLIDER - Updated ${currentScaleMode} scale with multiplier: ${currentThresholdMultiplier}x`);
+        console.log(`🔍 SLIDER - Updated ${currentScaleMode} scale view with multiplier: ${currentScaleMultiplier}x`);
     }
 }
 
 function onPresetClick(e) {
     const val = parseFloat(e.target.getAttribute('data-value'));
-    currentThresholdMultiplier = val;
+    currentScaleMultiplier = val;
     if (scaleRangeSlider) scaleRangeSlider.value = val;
     
     // Save to session storage
-    sessionStorage.setItem('qpcr_threshold_multiplier', currentThresholdMultiplier);
+    sessionStorage.setItem('qpcr_scale_multiplier', currentScaleMultiplier);
     
     updateSliderUI();
     
-    // Update chart scale and thresholds
+    // Update chart scale configuration (view only, not threshold values)
     if (window.amplificationChart) {
         // Update the chart scale configuration  
         const newScaleConfig = getScaleConfiguration();
         window.amplificationChart.options.scales.y = newScaleConfig;
         
-        // Update threshold annotations
-        updateChartThresholds();
-        
-        // Force chart update with new scale
+        // Force chart update with new scale (no threshold update needed)
         window.amplificationChart.update('none');
         
-        console.log(`🔍 PRESET - Updated ${currentScaleMode} scale with preset: ${currentThresholdMultiplier}x`);
+        console.log(`🔍 PRESET - Updated ${currentScaleMode} scale view with preset: ${currentScaleMultiplier}x`);
     }
 }
 
@@ -4236,7 +4226,7 @@ async function saveCombinedSession(filename, combinedResults, fluorophores = [])
         const thresholdSettings = {
             channelThresholds: channelThresholds || {},
             stableChannelThresholds: window.stableChannelThresholds || {},
-            currentThresholdMultiplier: currentThresholdMultiplier || 1.0,
+            currentScaleMultiplier: currentScaleMultiplier || 1.0,
             currentScaleMode: currentScaleMode || 'linear',
             currentChartScale: typeof currentChartScale !== 'undefined' ? currentChartScale : 'linear',
             currentLogMin: currentLogMin || 0.1
@@ -9334,7 +9324,7 @@ function createThresholdAnnotation(threshold, fluorophore, color = 'red', index 
         borderWidth: 2,
         borderDash: [5, 5],
         label: {
-            content: `${fluorophore}: ${adjustedThreshold.toFixed(2)} (${currentThresholdMultiplier.toFixed(1)}x)`,
+            content: `${fluorophore}: ${adjustedThreshold.toFixed(2)}`,
             enabled: true,
             position: index % 2 === 0 ? 'start' : 'end',
             backgroundColor: color || getFluorophoreColor(fluorophore),
@@ -9444,7 +9434,7 @@ function getScaleConfiguration() {
         return {
             ...baseConfig,
             type: 'logarithmic',
-            min: Math.max(currentThresholdMultiplier * 0.1, 0.1),
+            min: Math.max(currentScaleMultiplier * 0.1, 0.1),
             max: 100000
         };
     } else {
@@ -9452,7 +9442,7 @@ function getScaleConfiguration() {
             ...baseConfig,
             type: 'linear',
             min: 0,
-            max: Math.max(1000 * currentThresholdMultiplier, 1000)
+            max: Math.max(1000 * currentScaleMultiplier, 1000)
         };
     }
 }
@@ -9482,7 +9472,7 @@ function initializeChartToggle() {
     
     // Initialize from sessionStorage if available
     const savedScale = sessionStorage.getItem('qpcr_chart_scale');
-    const savedMultiplier = sessionStorage.getItem('qpcr_threshold_multiplier');
+    const savedMultiplier = sessionStorage.getItem('qpcr_scale_multiplier') || sessionStorage.getItem('qpcr_threshold_multiplier'); // Support legacy key
     
     if (savedScale && (savedScale === 'linear' || savedScale === 'log' || savedScale === 'logarithmic')) {
         // Handle legacy 'logarithmic' value
@@ -9491,8 +9481,8 @@ function initializeChartToggle() {
     }
     
     if (savedMultiplier) {
-        currentThresholdMultiplier = parseFloat(savedMultiplier);
-        console.log(`🔍 INIT - Loaded multiplier from session: ${currentThresholdMultiplier}`);
+        currentScaleMultiplier = parseFloat(savedMultiplier);
+        console.log(`🔍 INIT - Loaded scale multiplier from session: ${currentScaleMultiplier}`);
     }
     
     // Toggle button event listener (use the existing onScaleToggle function)

@@ -1081,18 +1081,31 @@ def save_combined_session():
 def delete_all_sessions():
     """Delete all analysis sessions and their results"""
     try:
+        # Enable foreign key constraints for SQLite
+        from sqlalchemy import text as sql_text
+        if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
+            db.session.execute(sql_text('PRAGMA foreign_keys = ON;'))
+        
         num_sessions = AnalysisSession.query.count()
         if num_sessions == 0:
             return jsonify({'message': 'No sessions to delete'}), 200
-        # Delete all WellResults first (if not using cascade)
-        WellResult.query.delete()
-        AnalysisSession.query.delete()
+        
+        print(f"[DEBUG] Deleting {num_sessions} sessions and their well results...")
+        
+        # Get all sessions to delete them one by one (ensures cascade works properly)
+        sessions = AnalysisSession.query.all()
+        for session in sessions:
+            print(f"[DEBUG] Deleting session {session.id} (cascade will delete well results)")
+            db.session.delete(session)
+        
         db.session.commit()
-        print(f"[API] Deleted all sessions and well results from database.")
+        print(f"[API] Successfully deleted all {num_sessions} sessions and their well results.")
         return jsonify({'message': f'All {num_sessions} sessions deleted successfully'})
     except Exception as e:
         db.session.rollback()
-        print(f"Error deleting all sessions: {e}")
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[ERROR] Error deleting all sessions: {e}\nTraceback:\n{tb}")
         return jsonify({'error': f'Database error: {str(e)}'}), 500
 
 # --- Delete a single session and its results ---
@@ -1100,26 +1113,28 @@ def delete_all_sessions():
 def delete_session(session_id):
     """Delete a single analysis session and its results"""
     try:
-        # Enable foreign key constraints for SQLite (if applicable)
-        from flask import current_app
+        # Enable foreign key constraints for SQLite
         from sqlalchemy import text as sql_text
-        if current_app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
-            db.session.connection().execute(sql_text('PRAGMA foreign_keys = ON;'))
-            print('[DEBUG] PRAGMA foreign_keys enabled for SQLite')
+        if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
+            db.session.execute(sql_text('PRAGMA foreign_keys = ON;'))
+        
         session = AnalysisSession.query.get_or_404(session_id)
-        print(f"[DEBUG] Attempting to delete WellResults for session {session_id}")
-        num_deleted = WellResult.query.filter_by(session_id=session.id).delete()
-        print(f"[DEBUG] Deleted {num_deleted} WellResults for session {session_id}")
+        well_count = WellResult.query.filter_by(session_id=session.id).count()
+        
+        print(f"[DEBUG] Deleting session {session_id} with {well_count} well results (using cascade)...")
+        
+        # Delete the session - cascade will automatically delete related well results
         db.session.delete(session)
         db.session.commit()
-        print(f"[API] Deleted session {session_id} and its well results.")
+        
+        print(f"[API] Successfully deleted session {session_id} and its {well_count} well results.")
         return jsonify({'message': f'Session {session_id} deleted successfully'})
     except Exception as e:
         db.session.rollback()
         import traceback
         tb = traceback.format_exc()
         print(f"[ERROR] Exception deleting session {session_id}: {e}\nTraceback:\n{tb}")
-        return jsonify({'error': f'Failed to delete session: {str(e)}', 'traceback': tb}), 500
+        return jsonify({'error': f'Failed to delete session: {str(e)}'}), 500
 
 @app.route('/experiments/statistics', methods=['POST'])
 def save_experiment_statistics():
