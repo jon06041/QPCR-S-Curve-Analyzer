@@ -10802,6 +10802,7 @@ function getPathogenTargets(testName) {
     return pathogenMap[testName] || [];
 }
 
+/* TEST 2: COMMENTED OUT - createIndividualPathogenGridDOM (DOM manipulation version)
 function createIndividualPathogenGridDOM(pathogenName, controlSets, gridIndex) {
     console.log(`🔍 PATHOGEN GRID - Creating DOM grid for ${pathogenName}`);
     
@@ -11059,6 +11060,7 @@ function getControlValidationForPathogen(pathogenName, controlType, setNumber) {
         details: 'No control data found'
     };
 }
+END TEST 2 COMMENT */
 
 function createPathogenControlGrids(controlsByChannel, testName) {
     console.log('🔍 PATHOGEN GRIDS - Creating grids for test:', testName);
