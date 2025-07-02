@@ -25,10 +25,28 @@
 - **Result**: ⚠️ **NOT TESTED** - Database error occurred before testing
 - **User Report**: "test 2 was not it but not sure" - unclear if actually tested
 
+#### ✅ Test 3 COMPLETED:
+- **Function**: `createPathogenSpecificGrids` (lines ~7788-7861) - MAJOR duplicate system
+- **Status**: COMMENTED OUT and committed (commit: 0883d50)
+- **Result**: ⚠️ **NOT TESTED** - User had to switch computers
+- **Note**: This was likely the main source of grid styling conflicts
+
 #### 📋 REMAINING FUNCTIONS TO TEST:
-1. **Next Test Target**: `createPathogenSpecificGrids` (line ~7788) - MAJOR duplicate system
-2. **updateControlGridWithRealCoordinates** (line ~7773) 
-3. **createPathogenControlGrids** (line ~11061) - Main entry point
+1. **Next Priority**: Test current state (3 functions commented out) - may be working now!
+2. **createPathogenGrid** (line ~7863) - Called by commented function, may be orphaned
+3. **updateControlGridWithRealCoordinates** (line ~7773) 
+4. **createPathogenControlGrids** (line ~11061) - Main entry point
+
+### 🎯 CRITICAL STATUS FOR NEXT AGENT:
+
+**CURRENT STATE**: 3 major duplicate functions commented out:
+- ✅ Test 1: `createIndividualPathogenGrid` (HTML string version)  
+- ✅ Test 2: `createIndividualPathogenGridDOM` (DOM manipulation version)
+- ✅ Test 3: `createPathogenSpecificGrids` (Major tabbed grid system)
+
+**LIKELY RESULT**: Control grids may now work properly with only the main system active:
+- **Active**: `createPathogenControlGrids` (main entry point) + `updateControlGridWithRealCoordinates`
+- **Removed**: All duplicate competing grid creation systems
 
 ### 🎯 IMMEDIATE ACTIONS FOR NEXT AGENT:
 
@@ -81,6 +99,7 @@ python3 app.py  # Check if server starts with database error
 ```
 Branch: fix/control-grid-cleanup
 Recent Commits:
+- 0883d50: TEST 3 Comment out createPathogenSpecificGrids (MAJOR)
 - 6b5bb6e: TEST 2 Comment out createIndividualPathogenGridDOM 
 - 77c75ec: TEST 1 Comment out createIndividualPathogenGrid
 - 1655040: Backup state before cleanup
