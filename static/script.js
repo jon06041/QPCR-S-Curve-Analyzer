@@ -10427,24 +10427,38 @@ async function displaySessionResults(session) {
 
 // Handle combined session deletion
 async function deleteSessionGroup(sessionId, event) {
+    console.log('deleteSessionGroup called with sessionId:', sessionId, 'type:', typeof sessionId);
+    
     if (event) {
         event.stopPropagation();
     }
+    
     // Find the session to determine if it's combined or individual
     let session = window.currentCombinedSessions?.find(s => s.id === sessionId);
+    
     // If not found in combined sessions, it might be an individual session ID (numeric)
     if (!session && !isNaN(sessionId)) {
+        console.log('Processing as individual database session ID:', sessionId);
         // Handle direct database session ID
         if (!confirm('Are you sure you want to delete this analysis session?')) {
             return;
         }
+        
         const deleteBtn = event && event.target ? event.target : null;
         if (deleteBtn) deleteBtn.disabled = true;
+        
         try {
+            console.log('Making DELETE request to /sessions/' + sessionId);
             const response = await fetch(`/sessions/${sessionId}`, {
                 method: 'DELETE'
             });
+            
+            console.log('Delete response status:', response.status);
+            
             if (response.ok) {
+                const result = await response.json().catch(() => ({ message: 'Session deleted' }));
+                console.log('Delete successful:', result);
+                alert('Session deleted successfully');
                 loadAnalysisHistory();
             } else {
                 let errorText = '';
@@ -10452,8 +10466,9 @@ async function deleteSessionGroup(sessionId, event) {
                     const errorData = await response.json();
                     errorText = errorData.error || 'Unknown error';
                 } catch (e) {
-                    errorText = 'Unknown error';
+                    errorText = `HTTP ${response.status}: ${response.statusText}`;
                 }
+                console.error('Delete failed:', errorText);
                 alert('Failed to delete session: ' + errorText);
             }
         } catch (error) {
@@ -10464,10 +10479,13 @@ async function deleteSessionGroup(sessionId, event) {
         }
         return;
     }
+    
     if (!session) {
+        console.error('Session not found for ID:', sessionId);
         alert('Session not found. Please refresh and try again.');
         return;
     }
+    
     let confirmMessage;
     if (session.is_combined) {
         confirmMessage = `Are you sure you want to delete this multi-fluorophore analysis? This will delete ${session.session_ids.length} individual sessions.`;
@@ -10514,34 +10532,31 @@ async function deleteSessionGroup(sessionId, event) {
 
 // Delete all sessions function
 async function deleteAllSessions() {
+    console.log('deleteAllSessions called');
+    
     if (!confirm('Are you sure you want to delete all analysis sessions? This action cannot be undone.')) {
+        console.log('User cancelled delete all operation');
         return;
     }
     
     try {
-        // Get all sessions first
-        const response = await fetch('/sessions');
-        const sessions = await response.json();
+        console.log('Making DELETE request to /sessions');
         
-        if (sessions.length === 0) {
-            alert('No sessions to delete.');
-            return;
+        // Use the dedicated delete all endpoint
+        const response = await fetch('/sessions', {
+            method: 'DELETE'
+        });
+        
+        console.log('Delete all response status:', response.status);
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+            console.error('Delete all failed:', errorData);
+            throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
         }
         
-        // Delete each session
-        let deletedCount = 0;
-        for (const session of sessions) {
-            try {
-                const deleteResponse = await fetch(`/sessions/${session.id}`, {
-                    method: 'DELETE'
-                });
-                if (deleteResponse.ok) {
-                    deletedCount++;
-                }
-            } catch (error) {
-                console.error(`Failed to delete session ${session.id}:`, error);
-            }
-        }
+        const result = await response.json();
+        console.log('Delete all sessions result:', result);
         
         // Clear local storage
         localStorage.removeItem('analysisSessions');
@@ -10550,13 +10565,13 @@ async function deleteAllSessions() {
         // Clear current analysis
         currentAnalysisResults = null;
         
-        // Refresh the page
-        alert(`Deleted ${deletedCount} sessions successfully.`);
+        // Show success message and reload
+        alert(result.message || 'All sessions deleted successfully.');
         window.location.reload();
         
     } catch (error) {
         console.error('Error deleting all sessions:', error);
-        alert('Error deleting sessions. Please try again.');
+        alert('Error deleting sessions: ' + error.message);
     }
 }
 
@@ -10676,35 +10691,40 @@ function extractTestCodeFromSession(sessionFilename) {
 function createIndividualPathogenGrid(pathogenName, controlSets, gridIndex) {
     const setCount = Object.keys(controlSets).length;
     
-    // Create grid HTML with 3x4 layout for BVAB (3 channels, 4th column blank)
+    // Create grid HTML with proper 5-column layout (Control + Set 1,2,3,4)
     let gridHtml = `
         <div class="pathogen-control-grid">
             <h5>${pathogenName}</h5>
             <div class="pathogen-grid">
-                <div class="pathogen-grid-corner"></div>
-                <div class="pathogen-set-header">1</div>
-                <div class="pathogen-set-header">2</div>
-                <div class="pathogen-set-header">3</div>
+                <div class="pathogen-grid-corner">Control</div>
+                <div class="pathogen-set-header">Set 1</div>
+                <div class="pathogen-set-header">Set 2</div>
+                <div class="pathogen-set-header">Set 3</div>
+                <div class="pathogen-set-header">Set 4</div>
                 
                 <div class="pathogen-type-label">H</div>
                 <div class="pathogen-control-cell" id="pathogen${gridIndex}H1">-</div>
                 <div class="pathogen-control-cell" id="pathogen${gridIndex}H2">-</div>
                 <div class="pathogen-control-cell" id="pathogen${gridIndex}H3">-</div>
+                <div class="pathogen-control-cell" id="pathogen${gridIndex}H4">-</div>
                 
                 <div class="pathogen-type-label">M</div>
                 <div class="pathogen-control-cell" id="pathogen${gridIndex}M1">-</div>
                 <div class="pathogen-control-cell" id="pathogen${gridIndex}M2">-</div>
                 <div class="pathogen-control-cell" id="pathogen${gridIndex}M3">-</div>
+                <div class="pathogen-control-cell" id="pathogen${gridIndex}M4">-</div>
                 
                 <div class="pathogen-type-label">L</div>
                 <div class="pathogen-control-cell" id="pathogen${gridIndex}L1">-</div>
                 <div class="pathogen-control-cell" id="pathogen${gridIndex}L2">-</div>
                 <div class="pathogen-control-cell" id="pathogen${gridIndex}L3">-</div>
+                <div class="pathogen-control-cell" id="pathogen${gridIndex}L4">-</div>
                 
-                <div class="pathogen-type-label">NTC</div>
+                <div class="pathogen-type-label ntc-label">NTC</div>
                 <div class="pathogen-control-cell" id="pathogen${gridIndex}NTC1">-</div>
                 <div class="pathogen-control-cell" id="pathogen${gridIndex}NTC2">-</div>
                 <div class="pathogen-control-cell" id="pathogen${gridIndex}NTC3">-</div>
+                <div class="pathogen-control-cell" id="pathogen${gridIndex}NTC4">-</div>
             </div>
         </div>
     `;
@@ -10780,8 +10800,8 @@ function getPathogenTargets(testName) {
     return pathogenMap[testName] || [];
 }
 
-function createIndividualPathogenGrid(pathogenName, controlSets, gridIndex) {
-    console.log(`🔍 PATHOGEN GRID - Creating grid for ${pathogenName}`);
+function createIndividualPathogenGridDOM(pathogenName, controlSets, gridIndex) {
+    console.log(`🔍 PATHOGEN GRID - Creating DOM grid for ${pathogenName}`);
     
     // Create pathogen grid container
     const pathogenGridDiv = document.createElement('div');
@@ -10798,16 +10818,16 @@ function createIndividualPathogenGrid(pathogenName, controlSets, gridIndex) {
     const gridDiv = document.createElement('div');
     gridDiv.className = 'pathogen-grid';
     gridDiv.style.display = 'grid';
-    gridDiv.style.gridTemplateColumns = 'auto repeat(4, 1fr)';
-    gridDiv.style.gap = '2px';
+    gridDiv.style.gridTemplateColumns = '80px repeat(4, 1fr)';
+    gridDiv.style.gap = '8px';
     
     // Add corner cell
     const cornerCell = document.createElement('div');
     cornerCell.className = 'pathogen-grid-corner';
-    cornerCell.textContent = 'Set';
+    cornerCell.textContent = 'Control';
     gridDiv.appendChild(cornerCell);
     
-    // Add set headers (1, 2, 3, 4)
+    // Add set headers (Set 1, Set 2, Set 3, Set 4)
     for (let set = 1; set <= 4; set++) {
         const setHeader = document.createElement('div');
         setHeader.className = 'pathogen-set-header';
@@ -10821,6 +10841,9 @@ function createIndividualPathogenGrid(pathogenName, controlSets, gridIndex) {
         // Add type label
         const typeLabel = document.createElement('div');
         typeLabel.className = 'pathogen-type-label';
+        if (type === 'NTC') {
+            typeLabel.className += ' ntc-label';
+        }
         typeLabel.textContent = type;
         gridDiv.appendChild(typeLabel);
         

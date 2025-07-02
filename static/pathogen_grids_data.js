@@ -607,20 +607,18 @@ function createSinglePathogenControlGrid(pathogen, controlData) {
         <div class="single-pathogen-grid">
             <h4>${pathogen.name} (${pathogen.fluorophore})</h4>
             <div class="control-grid-table" data-sets="${setNumbers.length}">
-                <div class="grid-header">
-                    <div class="grid-corner">Control</div>
+                <div class="grid-corner">Control</div>
     `;
     
-    // Dynamic set headers based on actual data
+    // Add set headers directly
     setNumbers.forEach(setNum => {
         gridHTML += `<div class="set-header">Set ${setNum}</div>`;
     });
-    gridHTML += `</div>`;
     
+    // Add control rows directly without wrapper divs
     controlTypes.forEach(controlType => {
-        const ntcClass = controlType === 'NTC' ? ' ntc-row' : '';
-        gridHTML += `<div class="control-row${ntcClass}">`;
-        gridHTML += `<div class="control-type-label">${controlType}</div>`;
+        const ntcClass = controlType === 'NTC' ? ' ntc-label' : '';
+        gridHTML += `<div class="control-type-label${ntcClass}">${controlType}</div>`;
         
         setNumbers.forEach(setNum => {
             const key = `${pathogen.fluorophore}_${controlType}_${setNum}`;
@@ -650,8 +648,6 @@ function createSinglePathogenControlGrid(pathogen, controlData) {
                 <span class="control-coordinate">${coordinate}</span>
             </div>`;
         });
-        
-        gridHTML += '</div>';
     });
     
     gridHTML += `
@@ -734,20 +730,17 @@ function createSinglePathogenGrid(pathogen, controlSets) {
         <div class="pathogen-control-grid">
             <h5>${pathogen.name} (${pathogen.fluorophore})</h5>
             <div class="pathogen-grid">
-                <div class="pathogen-grid-corner"></div>
-                <div class="pathogen-grid-corner"></div>
-                <div class="pathogen-set-header">1</div>
-                <div class="pathogen-set-header">2</div>
-                <div class="pathogen-set-header">3</div>
-                <div class="pathogen-set-header">4</div>
+                <div class="pathogen-grid-corner">Control</div>
+                <div class="pathogen-set-header">Set 1</div>
+                <div class="pathogen-set-header">Set 2</div>
+                <div class="pathogen-set-header">Set 3</div>
+                <div class="pathogen-set-header">Set 4</div>
     `;
     
     controlTypes.forEach((controlType, typeIndex) => {
-        const coordinate = pathogen.coordinates[typeIndex];
         const ntcClass = controlType === 'NTC' ? ' ntc-label' : '';
         
         gridHTML += `
-            <div class="pathogen-coord-label">${coordinate}</div>
             <div class="pathogen-type-label${ntcClass}">${controlType}</div>
         `;
         
@@ -804,27 +797,25 @@ function createSinglePathogenControlGridFromFallback(pathogen, fallbackSets) {
         return gridHTML + '<p>No control data available</p>';
     }
     
-    // Use the same grid structure as the primary system
+    // Use flat grid structure without wrapper divs
     const controlTypes = ['H', 'M', 'L', 'NTC'];
     const setNumbers = Object.keys(fallbackSets).sort();
     
     gridHTML += `
         <div class="single-pathogen-grid">
             <div class="control-grid-table" data-sets="${setNumbers.length}">
-                <div class="grid-header">
-                    <div class="grid-corner">Control</div>
+                <div class="grid-corner">Control</div>
     `;
     
-    // Dynamic set headers based on actual data
+    // Add set headers directly
     setNumbers.forEach(setNum => {
         gridHTML += `<div class="set-header">Set ${setNum}</div>`;
     });
-    gridHTML += `</div>`;
     
+    // Add control rows directly without wrapper divs
     controlTypes.forEach(controlType => {
-        const ntcClass = controlType === 'NTC' ? ' ntc-row' : '';
-        gridHTML += `<div class="control-row${ntcClass}">`;
-        gridHTML += `<div class="control-type-label">${controlType}</div>`;
+        const ntcClass = controlType === 'NTC' ? ' ntc-label' : '';
+        gridHTML += `<div class="control-type-label${ntcClass}">${controlType}</div>`;
         
         setNumbers.forEach(setNum => {
             const control = fallbackSets[setNum] && fallbackSets[setNum][controlType];
@@ -847,8 +838,6 @@ function createSinglePathogenControlGridFromFallback(pathogen, fallbackSets) {
                 <span class="control-coordinate">${coordinate}</span>
             </div>`;
         });
-        
-        gridHTML += '</div>';
     });
     
     gridHTML += `

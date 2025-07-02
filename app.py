@@ -1081,10 +1081,11 @@ def save_combined_session():
 def delete_all_sessions():
     """Delete all analysis sessions and their results"""
     try:
-        # Enable foreign key constraints for SQLite
+        # Enable foreign key constraints for SQLite FIRST
         from sqlalchemy import text as sql_text
         if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
             db.session.execute(sql_text('PRAGMA foreign_keys = ON;'))
+            db.session.commit()  # Commit the PRAGMA command
         
         num_sessions = AnalysisSession.query.count()
         if num_sessions == 0:
@@ -1092,11 +1093,12 @@ def delete_all_sessions():
         
         print(f"[DEBUG] Deleting {num_sessions} sessions and their well results...")
         
-        # Get all sessions to delete them one by one (ensures cascade works properly)
-        sessions = AnalysisSession.query.all()
-        for session in sessions:
-            print(f"[DEBUG] Deleting session {session.id} (cascade will delete well results)")
-            db.session.delete(session)
+        # Alternative approach: Delete well results first, then sessions
+        print("[DEBUG] Deleting all well results first...")
+        WellResult.query.delete()
+        
+        print("[DEBUG] Deleting all sessions...")
+        AnalysisSession.query.delete()
         
         db.session.commit()
         print(f"[API] Successfully deleted all {num_sessions} sessions and their well results.")
@@ -1113,17 +1115,22 @@ def delete_all_sessions():
 def delete_session(session_id):
     """Delete a single analysis session and its results"""
     try:
-        # Enable foreign key constraints for SQLite
+        # Enable foreign key constraints for SQLite FIRST
         from sqlalchemy import text as sql_text
         if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
             db.session.execute(sql_text('PRAGMA foreign_keys = ON;'))
+            db.session.commit()  # Commit the PRAGMA command
         
         session = AnalysisSession.query.get_or_404(session_id)
         well_count = WellResult.query.filter_by(session_id=session.id).count()
         
-        print(f"[DEBUG] Deleting session {session_id} with {well_count} well results (using cascade)...")
+        print(f"[DEBUG] Deleting session {session_id} with {well_count} well results...")
         
-        # Delete the session - cascade will automatically delete related well results
+        # Delete well results first, then session
+        print(f"[DEBUG] Deleting {well_count} well results for session {session_id}...")
+        WellResult.query.filter_by(session_id=session_id).delete()
+        
+        print(f"[DEBUG] Deleting session {session_id}...")
         db.session.delete(session)
         db.session.commit()
         
