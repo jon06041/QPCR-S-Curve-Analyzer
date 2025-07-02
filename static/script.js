@@ -6,6 +6,359 @@ let currentScaleMode = 'linear';
 // Store current threshold multiplier (slider value)
 let currentThresholdMultiplier = 1.0;
 
+// Function to get current scale mode
+function getCurrentScaleMode() {
+    return currentScaleMode;
+}
+
+// ========================================
+// CFX MANAGER STYLE BASELINE FLATTENING
+// ========================================
+
+let baselineFlatteningEnabled = false;
+
+/**
+ * Calculate baseline statistics for cycles 1-5
+ */
+function calculateBaseline(wellData) {
+    if (!wellData.raw_data || wellData.raw_data.length < 5) {
+        return null;
+    }
+    
+    // Extract RFU values from cycles 1-5
+    const earlyCycles = wellData.raw_data.slice(0, 5);
+    const baselineValues = earlyCycles.map(cycle => cycle.y);
+    
+    // Calculate baseline statistics
+    const mean = baselineValues.reduce((sum, val) => sum + val, 0) / baselineValues.length;
+    const sorted = baselineValues.slice().sort((a, b) => a - b);
+    const median = sorted.length % 2 === 0 
+        ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+        : sorted[Math.floor(sorted.length / 2)];
+    
+    // Calculate standard deviation
+    const variance = baselineValues.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / baselineValues.length;
+    const stdDev = Math.sqrt(variance);
+    
+    return { mean, median, stdDev, values: baselineValues };
+}
+
+/**
+ * Apply baseline flattening to RFU data (CFX Manager 3.1 style)
+ * Only flattens non-S-curve wells (negative/control wells) while preserving S-curves
+ */
+function applyBaselineFlattening(rawData, enableFlattening = false, wellData = null) {
+    if (!enableFlattening || !rawData || rawData.length < 10) {
+        return rawData;
+    }
+    
+    // Use backend S-curve detection if available, otherwise fallback to local detection
+    let isSCurve = false;
+    if (wellData && wellData.is_good_scurve !== undefined) {
+        isSCurve = wellData.is_good_scurve;
+        console.log(`🔍 BASELINE - Using backend S-curve detection: ${isSCurve ? 'S-curve' : 'non-S-curve'}`);
+    } else {
+        // Fallback to local detection if backend data not available
+        isSCurve = detectSCurve(rawData);
+        console.log(`🔍 BASELINE - Using local S-curve detection: ${isSCurve ? 'S-curve' : 'non-S-curve'}`);
+    }
+    
+    if (isSCurve) {
+        // This is a positive S-curve - DO NOT flatten, return original data
+        console.log('🔍 BASELINE - S-curve detected, preserving original curve shape');
+        return rawData;
+    }
+    
+    // This is a flat/negative curve - apply baseline flattening
+    console.log('🔍 BASELINE - Non-S-curve detected, applying baseline flattening');
+    
+    const baseline = calculateBaseline({ raw_data: rawData });
+    if (!baseline) return rawData;
+    
+    // For non-S-curves, flatten to a consistent baseline level
+    const targetBaseline = baseline.median; // Use median as target flat level
+    
+    const flattenedData = rawData.map((point, index) => {
+        // Apply aggressive flattening to the entire curve for non-S-curves
+        const flattenedValue = applyNonSCurveFlattening(point.y, targetBaseline, baseline);
+        return { x: point.x, y: flattenedValue };
+    });
+    
+    return flattenedData;
+}
+
+/**
+ * Detect if a curve is an S-curve (positive amplification) or flat curve (negative)
+ * More sensitive detection to properly preserve amplification curves
+ */
+function detectSCurve(rawData) {
+    if (!rawData || rawData.length < 10) return false;
+    
+    // Get RFU values
+    const rfuValues = rawData.map(point => point.y);
+    
+    // Calculate basic statistics
+    const minRFU = Math.min(...rfuValues);
+    const maxRFU = Math.max(...rfuValues);
+    const meanRFU = rfuValues.reduce((sum, val) => sum + val, 0) / rfuValues.length;
+    
+    // 1. Check for significant amplitude (more permissive threshold)
+    const amplitude = maxRFU - minRFU;
+    const relativeAmplitude = amplitude / meanRFU;
+    
+    // Lower thresholds to catch more potential S-curves
+    if (amplitude < 50 && relativeAmplitude < 0.2) {
+        // Very small amplitude suggests flat curve
+        return false;
+    }
+    
+    // 2. Check for exponential growth pattern (more sensitive)
+    const firstThird = rfuValues.slice(0, Math.floor(rfuValues.length / 3));
+    const lastThird = rfuValues.slice(-Math.floor(rfuValues.length / 3));
+    
+    const firstThirdMean = firstThird.reduce((sum, val) => sum + val, 0) / firstThird.length;
+    const lastThirdMean = lastThird.reduce((sum, val) => sum + val, 0) / lastThird.length;
+    
+    const growthRatio = lastThirdMean / firstThirdMean;
+    
+    // More permissive growth detection
+    if (growthRatio < 1.2) {
+        // Check for any sustained upward trend as backup
+        let consecutiveIncreases = 0;
+        let maxConsecutiveIncreases = 0;
+        
+        for (let i = 1; i < rfuValues.length; i++) {
+            if (rfuValues[i] > rfuValues[i - 1]) {
+                consecutiveIncreases++;
+                maxConsecutiveIncreases = Math.max(maxConsecutiveIncreases, consecutiveIncreases);
+            } else {
+                consecutiveIncreases = 0;
+            }
+        }
+        
+        // If we have sustained growth for at least 25% of the curve, it might be an S-curve
+        if (maxConsecutiveIncreases < rfuValues.length * 0.25) {
+            return false;
+        }
+    }
+    
+    // 3. Check for overall positive trend
+    const startValue = rfuValues[0];
+    const endValue = rfuValues[rfuValues.length - 1];
+    const overallGrowth = (endValue - startValue) / startValue;
+    
+    // If there's any meaningful overall growth (>20%), consider it potentially an S-curve
+    if (overallGrowth > 0.2 || amplitude > 100) {
+        console.log(`🔍 S-CURVE DETECTION - Amplitude: ${amplitude.toFixed(2)}, Growth Ratio: ${growthRatio.toFixed(2)}, Overall Growth: ${(overallGrowth * 100).toFixed(1)}% → S-CURVE DETECTED`);
+        return true;
+    }
+    
+    console.log(`🔍 S-CURVE DETECTION - Amplitude: ${amplitude.toFixed(2)}, Growth Ratio: ${growthRatio.toFixed(2)}, Overall Growth: ${(overallGrowth * 100).toFixed(1)}% → FLAT CURVE`);
+    return false;
+}
+
+/**
+ * Apply flattening specifically to non-S-curve wells (CFX Manager 3.1 style)
+ * Make flat curves more visible on linear scale by reducing noise while preserving baseline level
+ */
+function applyNonSCurveFlattening(rfuValue, targetBaseline, baseline) {
+    // For non-S-curves, gently flatten noise while keeping curves visible on linear scale
+    const noiseThreshold = baseline.stdDev * 2; // Use standard deviation for noise detection
+    
+    if (Math.abs(rfuValue - baseline.mean) > noiseThreshold) {
+        // Apply moderate flattening for noisy values - reduce to baseline range
+        const direction = rfuValue > baseline.mean ? 1 : -1;
+        return baseline.mean + (direction * baseline.stdDev * 0.5); // Keep small variation for visibility
+    } else {
+        // Apply light smoothing for values near baseline - preserve most of the signal
+        return targetBaseline + ((rfuValue - targetBaseline) * 0.7); // 30% reduction, keeping curve visible
+    }
+}
+
+/**
+ * Baseline smoothing algorithm (CFX Manager style)
+ */
+function smoothBaseline(rfuValue, baseline) {
+    // Apply weighted smoothing based on baseline statistics
+    const noiseThreshold = baseline.mean + (2 * baseline.stdDev);
+    
+    if (rfuValue <= noiseThreshold) {
+        // Apply aggressive smoothing to noise region
+        return applyLowPassFilter(rfuValue, baseline.median);
+    } else {
+        // Light smoothing to preserve early amplification signals
+        return applyMinimalSmoothing(rfuValue, baseline.mean);
+    }
+}
+
+/**
+ * Low pass filter for noise reduction
+ */
+function applyLowPassFilter(value, median) {
+    // Weighted average favoring median for noise reduction
+    return (value * 0.3) + (median * 0.7);
+}
+
+/**
+ * Minimal smoothing to preserve signals
+ */
+function applyMinimalSmoothing(value, mean) {
+    // Light smoothing that preserves signal characteristics
+    return (value * 0.8) + (mean * 0.2);
+}
+
+/**
+ * Toggle baseline flattening on/off (CFX Manager 3.1 style)
+ */
+function toggleBaselineFlattening() {
+    baselineFlatteningEnabled = !baselineFlatteningEnabled;
+    
+    const toggleBtn = document.getElementById('baselineToggle');
+    if (toggleBtn) {
+        toggleBtn.dataset.enabled = baselineFlatteningEnabled.toString();
+        const options = toggleBtn.querySelectorAll('.toggle-option');
+        options.forEach((option, index) => {
+            option.classList.toggle('active', index === (baselineFlatteningEnabled ? 1 : 0));
+        });
+    }
+    
+    // Save preference
+    sessionStorage.setItem('baselineFlatteningEnabled', baselineFlatteningEnabled.toString());
+    
+    // Update chart with new baseline settings
+    if (window.amplificationChart) {
+        refreshChartWithBaseline();
+    }
+    
+    const status = baselineFlatteningEnabled ? 'enabled' : 'disabled';
+    const description = baselineFlatteningEnabled 
+        ? 'Non-S-curves will be flattened, S-curves preserved' 
+        : 'All curves shown with original data';
+    
+    console.log(`🔍 BASELINE - CFX Manager 3.1 style baseline correction ${status}: ${description}`);
+}
+
+/**
+ * Refresh chart with baseline flattening applied (CFX Manager 3.1 style)
+ * Only flattens non-S-curve wells while preserving positive amplification curves
+ */
+function refreshChartWithBaseline() {
+    if (!window.amplificationChart || !currentAnalysisResults) return;
+    
+    // Get current chart datasets
+    const datasets = window.amplificationChart.data.datasets;
+    if (!datasets || datasets.length === 0) return;
+    
+    let processedCurves = 0;
+    let flattenedCurves = 0;
+    let preservedSCurves = 0;
+    
+    // Apply baseline flattening to each dataset
+    datasets.forEach(dataset => {
+        if (dataset.label && dataset.originalData) {
+            // Use original data if available, otherwise current data
+            const originalData = dataset.originalData || dataset.data;
+            
+            // Store original data for future use if not already stored
+            if (!dataset.originalData) {
+                dataset.originalData = [...dataset.data];
+            }
+            
+            // Extract well key from dataset label to get backend S-curve data
+            let wellData = null;
+            if (currentAnalysisResults && currentAnalysisResults.individual_results) {
+                // Try to find matching well data for this dataset
+                const wellKey = Object.keys(currentAnalysisResults.individual_results).find(key => {
+                    const result = currentAnalysisResults.individual_results[key];
+                    // Match by well ID and fluorophore in the dataset label
+                    if (dataset.label.includes(result.well_id || key.split('_')[0])) {
+                        if (result.fluorophore && dataset.label.includes(result.fluorophore)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                });
+                
+                if (wellKey) {
+                    wellData = currentAnalysisResults.individual_results[wellKey];
+                }
+            }
+            
+            // Apply CFX Manager 3.1 style baseline flattening with backend S-curve data
+            const processedData = applyBaselineFlattening(originalData, baselineFlatteningEnabled, wellData);
+            
+            // Check if this curve was flattened or preserved using backend data
+            const wasSCurve = wellData ? wellData.is_good_scurve : detectSCurve(originalData);
+            if (baselineFlatteningEnabled) {
+                if (wasSCurve) {
+                    preservedSCurves++;
+                } else {
+                    flattenedCurves++;
+                }
+            }
+            
+            dataset.data = processedData;
+            processedCurves++;
+        } else if (dataset.data && !dataset.originalData) {
+            // Fallback for datasets without originalData
+            dataset.originalData = [...dataset.data];
+            const processedData = applyBaselineFlattening(dataset.originalData, baselineFlatteningEnabled, null);
+            dataset.data = processedData;
+            processedCurves++;
+        }
+    });
+    
+    // Update chart
+    window.amplificationChart.update('none');
+    
+    if (baselineFlatteningEnabled) {
+        console.log(`🔍 BASELINE - CFX Manager 3.1 style processing complete: ${processedCurves} curves processed, ${preservedSCurves} S-curves preserved, ${flattenedCurves} flat curves baseline-corrected`);
+    } else {
+        console.log(`🔍 BASELINE - Baseline flattening disabled, restored ${processedCurves} curves to original data`);
+    }
+}
+
+/**
+ * Initialize baseline flattening controls
+ */
+function initializeBaselineFlattening() {
+    // Load saved preference
+    const saved = sessionStorage.getItem('baselineFlatteningEnabled');
+    if (saved) {
+        baselineFlatteningEnabled = saved === 'true';
+    }
+    
+    // Set up toggle button
+    const toggleBtn = document.getElementById('baselineToggle');
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', toggleBaselineFlattening);
+        
+        // Set initial state
+        toggleBtn.dataset.enabled = baselineFlatteningEnabled.toString();
+        const options = toggleBtn.querySelectorAll('.toggle-option');
+        options.forEach((option, index) => {
+            option.classList.toggle('active', index === (baselineFlatteningEnabled ? 1 : 0));
+        });
+    }
+    
+    // Only show baseline flattening in linear mode
+    updateBaselineFlatteningVisibility();
+}
+
+/**
+ * Update visibility of baseline flattening controls based on scale mode
+ */
+function updateBaselineFlatteningVisibility() {
+    const container = document.getElementById('baselineFlatteningContainer');
+    if (container) {
+        // Only show in linear mode
+        const isLinear = currentScaleMode === 'linear';
+        container.style.display = isLinear ? 'block' : 'none';
+    }
+}
+
+// ...existing code...
+
 // --- ENHANCED PER-CHANNEL THRESHOLD SYSTEM ---
 // This replaces the existing threshold calculation logic with a stable, 
 // per-channel system that maintains consistency across all views
@@ -74,6 +427,12 @@ function extractChannelControlWells() {
 function calculateStableChannelThreshold(channel, scale) {
     console.log(`🔍 THRESHOLD - Calculating ${scale} threshold for channel: ${channel}`);
     
+    // Ensure window.channelControlWells exists
+    if (!window.channelControlWells) {
+        console.warn(`channelControlWells not initialized for channel: ${channel}`);
+        return scale === 'log' ? 1.0 : 100.0; // Fallback values
+    }
+    
     if (!window.channelControlWells[channel]) {
         console.warn(`No control wells found for channel: ${channel}`);
         return scale === 'log' ? 1.0 : 100.0; // Fallback values
@@ -83,10 +442,10 @@ function calculateStableChannelThreshold(channel, scale) {
     let thresholdWells = [];
     
     // Prefer NTC controls, fallback to other controls
-    if (controls.NTC.length > 0) {
+    if (controls.NTC && controls.NTC.length > 0) {
         thresholdWells = controls.NTC;
         console.log(`🔍 THRESHOLD - Using ${controls.NTC.length} NTC controls for ${channel}`);
-    } else if (controls.other.length > 0) {
+    } else if (controls.other && controls.other.length > 0) {
         thresholdWells = controls.other;
         console.log(`🔍 THRESHOLD - Using ${controls.other.length} other controls for ${channel}`);
     } else {
@@ -181,16 +540,33 @@ function initializeChannelThresholds() {
     
     console.log(`🔍 THRESHOLD-INIT - Found channels: [${Array.from(channels).join(', ')}]`);
     
+    // Extract control wells for each channel before calculating thresholds
+    extractChannelControlWells();
+    
     // Calculate and store thresholds for each channel and scale
     channels.forEach(channel => {
         try {
             ['linear', 'log'].forEach(scale => {
-                const threshold = calculateChannelThreshold(channel, scale);
-                setChannelThreshold(channel, scale, threshold);
-                console.log(`🔍 THRESHOLD-INIT - ${channel} ${scale}: ${threshold.toFixed(2)}`);
+                const threshold = calculateStableChannelThreshold(channel, scale);
+                if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
+                    setChannelThreshold(channel, scale, threshold);
+                    console.log(`🔍 THRESHOLD-INIT - ${channel} ${scale}: ${threshold.toFixed(2)}`);
+                } else {
+                    console.warn(`🔍 THRESHOLD-INIT - Failed to calculate threshold for ${channel} ${scale}, using default`);
+                    // Set a default threshold if calculation fails
+                    const defaultThreshold = scale === 'log' ? 1.0 : 100.0;
+                    setChannelThreshold(channel, scale, defaultThreshold);
+                    console.log(`🔍 THRESHOLD-INIT - ${channel} ${scale}: ${defaultThreshold} (default)`);
+                }
             });
         } catch (e) {
             console.error(`🔍 THRESHOLD-INIT - Error calculating thresholds for channel ${channel}:`, e);
+            // Set default thresholds for both scales if there's an error
+            ['linear', 'log'].forEach(scale => {
+                const defaultThreshold = scale === 'log' ? 1.0 : 100.0;
+                setChannelThreshold(channel, scale, defaultThreshold);
+                console.log(`🔍 THRESHOLD-INIT - ${channel} ${scale}: ${defaultThreshold} (error fallback)`);
+            });
         }
     });
     
@@ -243,10 +619,21 @@ function getCurrentChannelThreshold(channel, scale = null) {
 function updateAllChannelThresholds() {
     console.log('🔍 THRESHOLD - Updating all channel thresholds');
     
-    if (!window.amplificationChart) return;
+    if (!window.amplificationChart) {
+        console.warn('🔍 THRESHOLD - No chart available');
+        return;
+    }
+    
+    // Ensure chart has annotation plugin
+    if (!window.amplificationChart.options.plugins) {
+        window.amplificationChart.options.plugins = {};
+    }
+    if (!window.amplificationChart.options.plugins.annotation) {
+        window.amplificationChart.options.plugins.annotation = { annotations: {} };
+    }
     
     // Get current chart annotations
-    const annotations = window.amplificationChart.options.plugins?.annotation?.annotations || {};
+    const annotations = window.amplificationChart.options.plugins.annotation.annotations;
     
     // Update threshold lines for all visible channels
     const visibleChannels = new Set();
@@ -254,9 +641,22 @@ function updateAllChannelThresholds() {
         window.amplificationChart.data.datasets.forEach(dataset => {
             // Extract channel from dataset label
             const match = dataset.label?.match(/\(([^)]+)\)/);
-            if (match) visibleChannels.add(match[1]);
+            if (match && match[1] !== 'Unknown') {
+                visibleChannels.add(match[1]);
+            }
         });
     }
+    
+    // If no channels detected from chart, try to get from current analysis results
+    if (visibleChannels.size === 0 && currentAnalysisResults?.individual_results) {
+        Object.values(currentAnalysisResults.individual_results).forEach(well => {
+            if (well.fluorophore) {
+                visibleChannels.add(well.fluorophore);
+            }
+        });
+    }
+    
+    console.log(`🔍 THRESHOLD - Found ${visibleChannels.size} channels: [${Array.from(visibleChannels).join(', ')}]`);
     
     // Clear old threshold annotations
     Object.keys(annotations).forEach(key => {
@@ -266,35 +666,100 @@ function updateAllChannelThresholds() {
     });
     
     // Add new threshold annotations for visible channels
+    const currentScale = currentScaleMode;
     Array.from(visibleChannels).forEach(channel => {
-        const threshold = getCurrentChannelThreshold(channel, currentScaleMode);
-        const annotationKey = `threshold_${channel}`;
+        const threshold = getCurrentChannelThreshold(channel, currentScale);
+        if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
+            const annotationKey = `threshold_${channel}`;
+            
+            annotations[annotationKey] = {
+                type: 'line',
+                yMin: threshold,
+                yMax: threshold,
+                borderColor: getChannelColor(channel),
+                borderWidth: 2,
+                borderDash: [5, 5],
+                label: {
+                    display: true,
+                    content: `${channel}: ${threshold.toFixed(2)}`,
+                    position: 'start',
+                    backgroundColor: 'rgba(255,255,255,0.8)',
+                    color: getChannelColor(channel),
+                    font: { size: 10, weight: 'bold' }
+                }
+            };
+            
+            console.log(`🔍 THRESHOLD - Added threshold for ${channel}: ${threshold.toFixed(2)}`);
+        } else {
+            console.warn(`🔍 THRESHOLD - Invalid threshold for ${channel}: ${threshold}`);
+        }
+    });
+    
+    // Update chart
+    window.amplificationChart.update('none');
+    
+    console.log(`🔍 THRESHOLD - Updated thresholds for channels: ${Array.from(visibleChannels).join(', ')}`);
+}
+
+function updateSingleChannelThreshold(fluorophore) {
+    console.log(`🔍 THRESHOLD - Updating threshold for single channel: ${fluorophore}`);
+    
+    if (!window.amplificationChart) {
+        console.warn('🔍 THRESHOLD - No chart available');
+        return;
+    }
+    
+    // Ensure chart has annotation plugin
+    if (!window.amplificationChart.options.plugins) {
+        window.amplificationChart.options.plugins = {};
+    }
+    if (!window.amplificationChart.options.plugins.annotation) {
+        window.amplificationChart.options.plugins.annotation = { annotations: {} };
+    }
+    
+    // Get current chart annotations
+    const annotations = window.amplificationChart.options.plugins.annotation.annotations;
+    
+    // Clear old threshold annotations for this channel
+    Object.keys(annotations).forEach(key => {
+        if (key.startsWith(`threshold_${fluorophore}`)) {
+            delete annotations[key];
+        }
+    });
+    
+    // Add new threshold annotation for this specific channel
+    const currentScale = currentScaleMode;
+    const threshold = getCurrentChannelThreshold(fluorophore, currentScale);
+    
+    if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
+        const annotationKey = `threshold_${fluorophore}`;
         
         annotations[annotationKey] = {
             type: 'line',
             yMin: threshold,
             yMax: threshold,
-            borderColor: getChannelColor(channel),
+            borderColor: getChannelColor(fluorophore),
             borderWidth: 2,
             borderDash: [5, 5],
             label: {
                 display: true,
-                content: `${channel}: ${threshold.toFixed(2)}`,
+                content: `${fluorophore}: ${threshold.toFixed(2)}`,
                 position: 'start',
                 backgroundColor: 'rgba(255,255,255,0.8)',
-                color: getChannelColor(channel),
+                color: getChannelColor(fluorophore),
                 font: { size: 10, weight: 'bold' }
             }
         };
-    });
+        
+        console.log(`🔍 THRESHOLD - Added threshold for ${fluorophore}: ${threshold.toFixed(2)}`);
+    } else {
+        console.warn(`🔍 THRESHOLD - Invalid threshold for ${fluorophore}: ${threshold}`);
+    }
     
     // Update chart
-    if (window.amplificationChart.options && window.amplificationChart.options.plugins) {
-        window.amplificationChart.options.plugins.annotation = { annotations };
-    }
     window.amplificationChart.update('none');
     
-    console.log(`🔍 THRESHOLD - Updated thresholds for channels: ${Array.from(visibleChannels).join(', ')}`);
+    console.log(`🔍 THRESHOLD - Updated threshold for channel: ${fluorophore}`);
 }
 
 /**
@@ -466,9 +931,21 @@ function calculateLinearThreshold(channelWells, channel) {
 }
 
 function setChannelThreshold(channel, scale, value) {
+    // Use the new stable threshold system
+    if (!window.stableChannelThresholds) {
+        window.stableChannelThresholds = {};
+    }
+    if (!window.stableChannelThresholds[channel]) {
+        window.stableChannelThresholds[channel] = {};
+    }
+    window.stableChannelThresholds[channel][scale] = value;
+    
+    // Also update the legacy system for compatibility
     if (!channelThresholds[channel]) channelThresholds[channel] = {};
     channelThresholds[channel][scale] = value;
-    // Persist in sessionStorage
+    
+    // Persist both systems in sessionStorage
+    sessionStorage.setItem('stableChannelThresholds', JSON.stringify(window.stableChannelThresholds));
     sessionStorage.setItem('channelThresholds', JSON.stringify(channelThresholds));
 }
 
@@ -495,33 +972,137 @@ function updateSliderUI() {
     if (scaleRangeLabel) scaleRangeLabel.textContent = currentScaleMode === 'log' ? 'Log Range:' : 'Linear Range:';
     if (scaleMultiplierLabel) scaleMultiplierLabel.textContent = currentThresholdMultiplier.toFixed(2) + 'x';
     if (scaleDescription) scaleDescription.textContent = currentScaleMode === 'log' ? 'Adjust log threshold' : 'Adjust linear threshold';
+    
+    // Sync toggle button state with current scale mode
+    syncToggleButtonState();
+}
+
+function syncToggleButtonState() {
+    if (scaleToggleBtn) {
+        scaleToggleBtn.setAttribute('data-scale', currentScaleMode);
+        
+        // Update toggle button visual state
+        const options = scaleToggleBtn.querySelectorAll('.toggle-option');
+        options.forEach((option, index) => {
+            option.classList.toggle('active', 
+                (currentScaleMode === 'linear' && index === 0) || 
+                (currentScaleMode === 'log' && index === 1)
+            );
+        });
+        console.log(`🔍 SYNC - Toggle button synchronized with ${currentScaleMode} scale`);
+    }
 }
 
 function onSliderChange(e) {
     currentThresholdMultiplier = parseFloat(e.target.value);
+    
+    // Save to session storage
+    sessionStorage.setItem('qpcr_threshold_multiplier', currentThresholdMultiplier);
+    
     updateSliderUI();
-    updateChartThresholds();
+    
+    // Update chart scale and thresholds
+    if (window.amplificationChart) {
+        // Update the chart scale configuration
+        const newScaleConfig = getScaleConfiguration();
+        window.amplificationChart.options.scales.y = newScaleConfig;
+        
+        // Update threshold annotations
+        updateChartThresholds();
+        
+        // Force chart update with new scale
+        window.amplificationChart.update('none');
+        
+        console.log(`🔍 SLIDER - Updated ${currentScaleMode} scale with multiplier: ${currentThresholdMultiplier}x`);
+    }
 }
 
 function onPresetClick(e) {
     const val = parseFloat(e.target.getAttribute('data-value'));
     currentThresholdMultiplier = val;
     if (scaleRangeSlider) scaleRangeSlider.value = val;
+    
+    // Save to session storage
+    sessionStorage.setItem('qpcr_threshold_multiplier', currentThresholdMultiplier);
+    
     updateSliderUI();
-    updateChartThresholds();
+    
+    // Update chart scale and thresholds
+    if (window.amplificationChart) {
+        // Update the chart scale configuration  
+        const newScaleConfig = getScaleConfiguration();
+        window.amplificationChart.options.scales.y = newScaleConfig;
+        
+        // Update threshold annotations
+        updateChartThresholds();
+        
+        // Force chart update with new scale
+        window.amplificationChart.update('none');
+        
+        console.log(`🔍 PRESET - Updated ${currentScaleMode} scale with preset: ${currentThresholdMultiplier}x`);
+    }
 }
 
 function onScaleToggle() {
     currentScaleMode = (currentScaleMode === 'linear') ? 'log' : 'linear';
-    if (scaleToggleBtn) scaleToggleBtn.setAttribute('data-scale', currentScaleMode);
-    // Update UI
+    
+    // Save preference to session storage
+    sessionStorage.setItem('qpcr_chart_scale', currentScaleMode);
+    
+    // Update chart with new scale
+    if (window.amplificationChart) {
+        const newScaleConfig = getScaleConfiguration();
+        window.amplificationChart.options.scales.y = newScaleConfig;
+        window.amplificationChart.update('none');
+    }
+    
+    // Update UI (this will also sync the toggle button)
     updateSliderUI();
     updateChartThresholds();
+    
+    console.log(`🔍 TOGGLE - Switched to ${currentScaleMode} scale`);
 }
 
 function updateChartThresholds() {
-    console.log('🔍 CHART-THRESHOLD - Updating chart thresholds (delegating to updateAllChannelThresholds)');
-    updateAllChannelThresholds();
+    console.log('🔍 CHART-THRESHOLD - Updating chart thresholds');
+    
+    if (!window.amplificationChart) {
+        console.warn('🔍 CHART-THRESHOLD - No chart available');
+        return;
+    }
+    
+    // Ensure we have analysis results and channel thresholds are initialized
+    if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {
+        console.warn('🔍 CHART-THRESHOLD - No analysis results available, trying to initialize thresholds');
+        // Try to initialize thresholds if we have analysis data
+        if (window.currentAnalysisResults) {
+            currentAnalysisResults = window.currentAnalysisResults;
+            initializeChannelThresholds();
+        }
+        return;
+    }
+    
+    // Check if this is a single-well chart or multi-well chart
+    const datasets = window.amplificationChart.data?.datasets || [];
+    if (datasets.length === 0) {
+        console.warn('🔍 CHART-THRESHOLD - No datasets found in chart');
+        return;
+    }
+    
+    // Extract fluorophore from first dataset label
+    const firstDataset = datasets[0];
+    const match = firstDataset.label?.match(/\(([^)]+)\)/);
+    
+    if (match && match[1] !== 'Unknown') {
+        // Single-channel chart - apply threshold for specific fluorophore
+        const fluorophore = match[1];
+        console.log(`🔍 CHART-THRESHOLD - Detected single-channel chart for ${fluorophore}`);
+        updateSingleChannelThreshold(fluorophore);
+    } else {
+        // Multi-channel chart - apply thresholds for all channels
+        console.log('🔍 CHART-THRESHOLD - Detected multi-channel chart');
+        updateAllChannelThresholds();
+    }
 }
 
 // --- Initialization ---
@@ -536,6 +1117,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     if (scaleToggleBtn) scaleToggleBtn.addEventListener('click', onScaleToggle);
     updateSliderUI();
+    
+    // Initialize baseline flattening controls
+    initializeBaselineFlattening();
 });
 // ========================================
 // MULTICHANNEL SEQUENTIAL PROCESSING FUNCTIONS
@@ -1281,9 +1865,12 @@ function validateFilePattern(filename) {
 }
 
 function handleFileUpload(file, type = 'amplification') {
-    if (!file) return;
+    if (!file) {
+        console.error('🔍 UPLOAD - No file provided to handleFileUpload');
+        return;
+    }
     
-    console.log(`Uploading file: ${file.name}, type: ${type}`);
+    console.log(`🔍 UPLOAD - Starting file upload: ${file.name}, type: ${type}, size: ${file.size} bytes`);
     
     // Validate filename pattern for CFX Manager format
     if (!validateFilePattern(file.name)) {
@@ -1595,29 +2182,35 @@ async function performAnalysis() {
         // If only one fluorophore was analyzed, save it properly to database
         if (fluorophores.length === 1) {
             const singleResult = allResults[fluorophores[0]];
+            if (!singleResult || !singleResult.individual_results) {
+                alert('Error: No valid analysis results found for this channel. Please check your input files.');
+                console.error('❌ SINGLE-CHANNEL - No valid individual_results in singleResult:', singleResult);
+                if (loadingIndicator) loadingIndicator.style.display = 'none';
+                return;
+            }
             analysisResults = singleResult;
-            
+
             // Set global variables for control grid access during fresh analysis
             currentAnalysisResults = singleResult;
             window.currentAnalysisResults = singleResult;
-            
+
             // Initialize channel thresholds after analysis results are loaded
             setTimeout(() => {
                 initializeChannelThresholds();
             }, 100);
-            
+
             // Debug: Log the single result structure for control grid debugging
             console.log('🔍 SINGLE-CHANNEL - Single result for control grid:', {
                 totalWells: Object.keys(singleResult.individual_results || {}).length,
                 fluorophore: fluorophores[0],
                 sampleKeys: Object.keys(singleResult.individual_results || {}).slice(0, 10)
             });
-            
+
             const filename = amplificationFiles[fluorophores[0]].fileName;
-            
+
             // Save single fluorophore session to database with proper well counts
             await saveSingleFluorophoreSession(filename, singleResult, fluorophores[0]);
-            
+
             // Save experiment statistics for trend analysis (single-channel) - with error handling
             try {
                 const basePattern = extractBasePattern(filename);
@@ -1627,7 +2220,7 @@ async function performAnalysis() {
                 console.error('⚠️ Statistics save failed for single-channel (non-critical):', statsError);
                 // Don't throw - statistics are optional
             }
-            
+
             await displayAnalysisResults(singleResult);
         } else {
             // Filter out null/failed results before combining
@@ -3599,13 +4192,56 @@ async function saveSingleFluorophoreSession(filename, results, fluorophore) {
 
 async function saveCombinedSession(filename, combinedResults, fluorophores = []) {
     try {
-        console.log('🔍 SAVE-DEBUG - Saving combined session:', {
+        console.log('🔍 SAVE-COMBINED-DEBUG - Saving combined session:', {
             filename: filename,
             totalWells: Object.keys(combinedResults.individual_results || {}).length,
             fluorophores: fluorophores,
             fluorophoreCount: combinedResults.fluorophore_count
         });
+
+        // Ensure JSON fields are properly serialized for database storage
+        const processedResults = {
+            ...combinedResults,
+            individual_results: {}
+        };
+
+        // Process each well result to ensure proper JSON serialization
+        if (combinedResults && combinedResults.individual_results) {
+            for (const [wellKey, wellData] of Object.entries(combinedResults.individual_results)) {
+                processedResults.individual_results[wellKey] = {
+                    ...wellData,
+                    // Ensure JSON fields are strings for database storage
+                    raw_cycles: typeof wellData.raw_cycles === 'string' ? wellData.raw_cycles : JSON.stringify(wellData.raw_cycles || []),
+                    raw_rfu: typeof wellData.raw_rfu === 'string' ? wellData.raw_rfu : JSON.stringify(wellData.raw_rfu || []),
+                    fitted_curve: typeof wellData.fitted_curve === 'string' ? wellData.fitted_curve : JSON.stringify(wellData.fitted_curve || []),
+                    fit_parameters: typeof wellData.fit_parameters === 'string' ? wellData.fit_parameters : JSON.stringify(wellData.fit_parameters || {}),
+                    parameter_errors: typeof wellData.parameter_errors === 'string' ? wellData.parameter_errors : JSON.stringify(wellData.parameter_errors || {}),
+                    anomalies: typeof wellData.anomalies === 'string' ? wellData.anomalies : JSON.stringify(wellData.anomalies || []),
+                    // Ensure threshold-related fields are properly preserved
+                    threshold_value: wellData.threshold_value !== undefined ? Number(wellData.threshold_value) : null,
+                    is_good_scurve: Boolean(wellData.is_good_scurve),
+                    // Preserve all numeric fields as numbers
+                    amplitude: wellData.amplitude !== undefined ? Number(wellData.amplitude) : null,
+                    r2_score: wellData.r2_score !== undefined ? Number(wellData.r2_score) : null,
+                    rmse: wellData.rmse !== undefined ? Number(wellData.rmse) : null,
+                    steepness: wellData.steepness !== undefined ? Number(wellData.steepness) : null,
+                    midpoint: wellData.midpoint !== undefined ? Number(wellData.midpoint) : null,
+                    baseline: wellData.baseline !== undefined ? Number(wellData.baseline) : null,
+                    cq_value: wellData.cq_value !== undefined ? Number(wellData.cq_value) : null
+                };
+            }
+        }
         
+        // Include channel-specific and scale-specific threshold settings
+        const thresholdSettings = {
+            channelThresholds: channelThresholds || {},
+            stableChannelThresholds: window.stableChannelThresholds || {},
+            currentThresholdMultiplier: currentThresholdMultiplier || 1.0,
+            currentScaleMode: currentScaleMode || 'linear',
+            currentChartScale: typeof currentChartScale !== 'undefined' ? currentChartScale : 'linear',
+            currentLogMin: currentLogMin || 0.1
+        };
+
         const response = await fetch('/sessions/save-combined', {
             method: 'POST',
             headers: {
@@ -3613,14 +4249,15 @@ async function saveCombinedSession(filename, combinedResults, fluorophores = [])
             },
             body: JSON.stringify({
                 filename: filename,
-                combined_results: combinedResults,
-                fluorophores: fluorophores
+                combined_results: processedResults,
+                fluorophores: fluorophores,
+                threshold_settings: thresholdSettings
             })
         });
         
         if (!response.ok) {
             const errorData = await response.json();
-            console.error('Failed to save combined session:', errorData);
+            console.error('❌ Failed to save combined session:', errorData);
             throw new Error(`Server error: ${response.status}`);
         }
         
@@ -3631,7 +4268,7 @@ async function saveCombinedSession(filename, combinedResults, fluorophores = [])
         loadAnalysisHistory();
         
     } catch (error) {
-        console.error('Error saving combined session:', error);
+        console.error('❌ Error saving combined session:', error);
         // Fall back to individual sessions
         console.log('Falling back to individual sessions:', fluorophores);
         loadAnalysisHistory();
@@ -8357,8 +8994,6 @@ function showAllCurves(selectedFluorophore) {
     setTimeout(() => {
         updateChartThresholds();
     }, 100);
-    
-    window.amplificationChart = new Chart(ctx, chartConfig);
 }
 
 function showGoodCurves(selectedFluorophore) {
@@ -8431,95 +9066,23 @@ function showGoodCurves(selectedFluorophore) {
         });
     }
     
-    // Create chart with good curves only
-    // Collect all threshold values per fluorophore, then use median per channel
-    const channelThresholds = {};
-    Object.keys(results).forEach((wellKey) => {
-        const wellData = results[wellKey];
-        const amplitude = wellData.amplitude || 0;
-        if (amplitude <= 500) return;
-        if (selectedFluorophore !== 'all' && wellData.fluorophore !== selectedFluorophore) return;
-        if (wellData.threshold_value != null && !isNaN(wellData.threshold_value) && wellData.fluorophore) {
-            const fluor = wellData.fluorophore;
-            if (!channelThresholds[fluor]) channelThresholds[fluor] = [];
-            channelThresholds[fluor].push(Number(wellData.threshold_value));
-        }
-    });
-    let annotation = undefined;
-    if (Object.keys(channelThresholds).length > 0) {
-        let annos = {};
-        let idx = 1;
-        Object.entries(channelThresholds).forEach(([fluor, thresholds]) => {
-            if (thresholds.length > 0) {
-                const sorted = thresholds.slice().sort((a, b) => a - b);
-                const median = sorted[Math.floor(sorted.length / 2)];
-                let labelText = `threshold (${fluor})`;
-                annos[`threshold${idx}`] = {
-                    type: 'line',
-                    yMin: median,
-                    yMax: median,
-                    borderColor: getFluorophoreColor(fluor),
-                    borderWidth: 2,
-                    label: {
-                        display: true,
-                        content: labelText,
-                        color: getFluorophoreColor(fluor),
-                        backgroundColor: 'white',
-                        position: 'end',
-                        font: { weight: 'bold' }
-                    }
-                };
-                idx++;
-            }
-        });
-        annotation = { annotations: annos };
-    }
-    window.amplificationChart = new Chart(ctx, {
-        type: 'line',
-        data: { datasets },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                title: {
-                    display: true,
-                    text: `Positive Results Only - ${selectedFluorophore === 'all' ? 'All Fluorophores' : selectedFluorophore}`,
-                    font: { size: 16, weight: 'bold' }
-                },
-                legend: {
-                    display: datasets.length <= 10 // Show legend only for reasonable number of curves
-                },
-                tooltip: {
-                    enabled: datasets.length <= 20 // Disable tooltips for better performance with many curves
-                },
-                ...(annotation ? { annotation } : {})
-            },
-            scales: {
-                x: {
-                    type: 'linear',
-                    title: { display: true, text: 'Cycle Number', font: { size: 14 } },
-                    grid: { color: 'rgba(0,0,0,0.1)' }
-                },
-                y: {
-                    type: 'linear',
-                    title: { display: true, text: 'RFU', font: { size: 14 } },
-                    grid: { color: 'rgba(0,0,0,0.1)' }
-                }
-            },
-            interaction: {
-                intersect: false,
-                mode: 'index'
-            },
-            elements: {
-                point: {
-                    radius: 0
-                },
-                line: {
-                    tension: 0.1
-                }
-            }
-        }
-    });
+    // Create chart with stable threshold system
+    const chartConfig = createChartConfiguration(
+        'line', 
+        datasets, 
+        `Positive Results Only - ${selectedFluorophore === 'all' ? 'All Fluorophores' : selectedFluorophore}`
+    );
+    
+    // Override some options for good curves display
+    chartConfig.options.plugins.legend.display = datasets.length <= 10; // Show legend only for reasonable number of curves
+    chartConfig.options.plugins.tooltip.enabled = datasets.length <= 20; // Disable tooltips for better performance
+    
+    window.amplificationChart = new Chart(ctx, chartConfig);
+    
+    // Apply stable threshold system after chart creation
+    setTimeout(() => {
+        updateChartThresholds();
+    }, 100);
 }
 
 function showResultsFiltered(selectedFluorophore, resultType) {
@@ -8735,7 +9298,7 @@ function calculateChannelThreshold(cycles, rfu) {
     threshold = Math.max(threshold, minThreshold);
     
     // For log scale compatibility, ensure threshold is well above noise floor
-    if (currentChartScale === 'logarithmic') {
+    if (currentScaleMode === 'log') {
         threshold = Math.max(threshold, mean * 2); // At least 2x baseline for log visibility
     }
     
@@ -8750,90 +9313,17 @@ function calculateChannelThreshold(cycles, rfu) {
     };
 }
 
-function calculateThresholdForWell(wellData) {
-    try {
-        const cycles = typeof wellData.raw_cycles === 'string' ? 
-            JSON.parse(wellData.raw_cycles) : wellData.raw_cycles;
-        const rfu = typeof wellData.raw_rfu === 'string' ? 
-            JSON.parse(wellData.raw_rfu) : wellData.raw_rfu;
-        
-        return calculateChannelThreshold(cycles, rfu);
-    } catch (error) {
-        console.error('Error calculating threshold for well:', error);
-        return null;
-    }
-}
+// Legacy per-well threshold function removed - using channel-based thresholds instead
 
 function updateThresholdAnnotations() {
-    if (!window.amplificationChart || !currentAnalysisResults || !currentAnalysisResults.individual_results) return;
-    
-    // Get current display context
-    const selectedWell = document.getElementById('wellSelect')?.value;
-    const selectedFluorophore = document.getElementById('fluorophoreSelect')?.value;
-    
-    let annotations = {};
-    
-    if (selectedWell && selectedWell !== 'all') {
-        // Single well view - show threshold for this well's fluorophore
-        const wellKey = Object.keys(currentAnalysisResults.individual_results || {})
-            .find(key => key.startsWith(selectedWell));
-        
-        if (wellKey) {
-            const wellData = currentAnalysisResults.individual_results[wellKey];
-            const fluorophore = wellData.fluorophore;
-            const threshold = getScaledThreshold(fluorophore);
-            
-            if (threshold) {
-                annotations.thresholdLine = createThresholdAnnotation(threshold, fluorophore);
-            }
-        }
-        
-    } else if (selectedFluorophore && selectedFluorophore !== 'all') {
-        // Single fluorophore view - show threshold for this fluorophore
-        const threshold = getScaledThreshold(selectedFluorophore);
-        
-        if (threshold) {
-            annotations.thresholdLine = createThresholdAnnotation(threshold, selectedFluorophore);
-        }
-        
-    } else {
-        // All wells view - show thresholds for all visible fluorophores
-        const visibleFluorophores = getVisibleFluorophores();
-        let annotationIndex = 0;
-        
-        visibleFluorophores.forEach(fluorophore => {
-            const threshold = getScaledThreshold(fluorophore);
-            if (threshold) {
-                annotations[`threshold_${fluorophore}`] = createThresholdAnnotation(
-                    threshold, 
-                    fluorophore, 
-                    getFluorophoreColor(fluorophore),
-                    annotationIndex
-                );
-                annotationIndex++;
-            }
-        });
-    }
-    
-    // Update chart annotations
-    if (!window.amplificationChart || !window.amplificationChart.options) return;
-    
-    if (Object.keys(annotations).length > 0) {
-        if (window.amplificationChart.options.plugins) {
-            window.amplificationChart.options.plugins.annotation = { annotations };
-        }
-    } else {
-        // Remove annotations if none
-        if (window.amplificationChart.options.plugins && window.amplificationChart.options.plugins.annotation) {
-            delete window.amplificationChart.options.plugins.annotation;
-        }
-    }
-    
-    window.amplificationChart.update('none');
+    // This function is deprecated - use updateChartThresholds() instead
+    // which properly handles channel-specific thresholds for log/linear scales
+    console.warn('updateThresholdAnnotations is deprecated - using updateChartThresholds instead');
+    updateChartThresholds();
 }
 
 function createThresholdAnnotation(threshold, fluorophore, color = 'red', index = 0) {
-    const adjustedThreshold = currentChartScale === 'logarithmic' ? 
+    const adjustedThreshold = currentScaleMode === 'log' ? 
         Math.max(threshold, currentLogMin || 0.1) : threshold;
     
     return {
@@ -8886,294 +9376,7 @@ function getFluorophoreColor(fluorophore) {
     return colors[fluorophore] || '#333333';
 }
 
-function updateChartWithThreshold(threshold, fluorophore) {
-    // Legacy function - redirect to new system
-    if (!window.amplificationChart || !window.amplificationChart.options) return;
-    
-    const annotations = {
-        thresholdLine: createThresholdAnnotation(threshold, fluorophore)
-    };
-    
-    if (window.amplificationChart.options.plugins) {
-        window.amplificationChart.options.plugins.annotation = { annotations };
-    }
-    window.amplificationChart.update('none');
-}
-
-
-// --- Enhanced Chart Scale Toggle Functionality ---
-let currentChartScale = 'linear'; // Default to linear scale
-let currentLogMin = 0.1; // Default log minimum for backward compatibility
-// (Removed duplicate threshold variables; use the global ones at the top of the file)
-
-function initializeChartToggle() {
-    const toggleBtn = document.getElementById('scaleToggle');
-    const scaleRangeContainer = document.getElementById('scaleRangeContainer');
-    const scalePresetsContainer = document.getElementById('scalePresetsContainer');
-    const scaleRangeSlider = document.getElementById('scaleRangeSlider');
-    const scaleRangeLabel = document.getElementById('scaleRangeLabel');
-    const scaleMultiplier = document.getElementById('scaleMultiplier');
-    const scaleDescription = document.getElementById('scaleDescription');
-    
-    if (!toggleBtn) return;
-    
-    // Initialize from sessionStorage if available
-    const savedScale = sessionStorage.getItem('qpcr_chart_scale');
-    const savedMultiplier = sessionStorage.getItem('qpcr_threshold_multiplier');
-    
-    if (savedScale && (savedScale === 'linear' || savedScale === 'logarithmic')) {
-        currentChartScale = savedScale;
-        updateToggleAppearance(currentChartScale);
-    }
-    
-    if (savedMultiplier) {
-        currentThresholdMultiplier = parseFloat(savedMultiplier);
-        if (scaleRangeSlider) scaleRangeSlider.value = currentThresholdMultiplier;
-        updateSliderDisplay();
-    }
-    
-    // Toggle button event listener
-    toggleBtn.addEventListener('click', function() {
-        // Toggle between linear and logarithmic
-        currentChartScale = currentChartScale === 'linear' ? 'logarithmic' : 'linear';
-        
-        // Save preference
-        sessionStorage.setItem('qpcr_chart_scale', currentChartScale);
-        
-        // Update toggle appearance
-        updateToggleAppearance(currentChartScale);
-        
-        // Update slider configuration based on scale
-        updateSliderConfiguration();
-        
-        // Update chart if it exists
-        updateChartScale();
-        
-        // Recalculate and update thresholds for new scale
-        setTimeout(() => {
-            updateAllThresholds();
-        }, 100);
-    });
-    
-    // Slider event listener
-    if (scaleRangeSlider) {
-        scaleRangeSlider.addEventListener('input', function() {
-            const value = parseFloat(this.value);
-            
-            if (currentChartScale === 'linear') {
-                currentThresholdMultiplier = value;
-                sessionStorage.setItem('qpcr_threshold_multiplier', currentThresholdMultiplier);
-            } else {
-                // For log scale, this controls the minimum value
-                currentLogMin = value;
-                sessionStorage.setItem('qpcr_log_min', currentLogMin);
-            }
-            
-            updateSliderDisplay();
-            
-            // Update chart in real-time
-            updateChartScale();
-            
-            // Update thresholds if in linear mode
-            if (currentChartScale === 'linear') {
-                updateAllThresholds();
-            }
-        });
-    }
-    
-    // Preset buttons event listeners
-    const presetButtons = document.querySelectorAll('.preset-btn');
-    presetButtons.forEach(btn => {
-        btn.addEventListener('click', function() {
-            const value = parseFloat(this.getAttribute('data-value'));
-            
-            if (currentChartScale === 'linear') {
-                currentThresholdMultiplier = value;
-                if (scaleRangeSlider) scaleRangeSlider.value = value;
-                sessionStorage.setItem('qpcr_threshold_multiplier', currentThresholdMultiplier);
-            } else {
-                // For log scale presets (future enhancement)
-                const logValue = value * 10; // Convert multiplier to log minimum
-                currentLogMin = logValue;
-                if (scaleRangeSlider) scaleRangeSlider.value = logValue;
-                sessionStorage.setItem('qpcr_log_min', currentLogMin);
-            }
-            
-            updateSliderDisplay();
-            
-            // Update active preset
-            presetButtons.forEach(b => b.classList.remove('active'));
-            this.classList.add('active');
-            
-            // Update chart and thresholds
-            updateChartScale();
-            if (currentChartScale === 'linear') {
-                updateAllThresholds();
-            }
-        });
-    });
-    
-    // Initialize slider configuration
-    updateSliderConfiguration();
-}
-
-function updateSliderConfiguration() {
-    const scaleRangeSlider = document.getElementById('scaleRangeSlider');
-    const scaleRangeLabel = document.getElementById('scaleRangeLabel');
-    const presetButtons = document.querySelectorAll('.preset-btn');
-    
-    if (currentChartScale === 'linear') {
-        // Linear scale: threshold multiplier (0.1x to 10x)
-        if (scaleRangeSlider) {
-            scaleRangeSlider.min = '0.1';
-            scaleRangeSlider.max = '10';
-            scaleRangeSlider.step = '0.1';
-            scaleRangeSlider.value = currentThresholdMultiplier;
-        }
-        if (scaleRangeLabel) scaleRangeLabel.textContent = 'Threshold Scale:';
-        
-        // Update preset buttons for linear scale
-        const presetValues = [
-            { value: 0.5, text: '0.5x', desc: 'Conservative' },
-            { value: 1.0, text: '1.0x', desc: 'Standard' },
-            { value: 2.0, text: '2.0x', desc: 'Strict' },
-            { value: 5.0, text: '5.0x', desc: 'Very Strict' }
-        ];
-        
-        presetButtons.forEach((btn, index) => {
-            if (presetValues[index]) {
-                btn.setAttribute('data-value', presetValues[index].value);
-                btn.textContent = presetValues[index].text;
-                btn.title = presetValues[index].desc;
-            }
-        });
-        
-    } else {
-        // Log scale: minimum value (0.1 to 100)
-        if (scaleRangeSlider) {
-            scaleRangeSlider.min = '0.1';
-            scaleRangeSlider.max = '100';
-            scaleRangeSlider.step = '0.1';
-            scaleRangeSlider.value = currentLogMin || 0.1;
-        }
-        if (scaleRangeLabel) scaleRangeLabel.textContent = 'Log Range:';
-        
-        // Update preset buttons for log scale
-        const logPresetValues = [
-            { value: 0.1, text: 'Noise', desc: 'Show all noise' },
-            { value: 1.0, text: 'Low', desc: 'Low signal focus' },
-            { value: 10, text: 'Mid', desc: 'Mid-range focus' },
-            { value: 100, text: 'High', desc: 'High signal only' }
-        ];
-        
-        presetButtons.forEach((btn, index) => {
-            if (logPresetValues[index]) {
-                btn.setAttribute('data-value', logPresetValues[index].value);
-                btn.textContent = logPresetValues[index].text;
-                btn.title = logPresetValues[index].desc;
-            }
-        });
-    }
-    
-    updateSliderDisplay();
-}
-
-function updateSliderDisplay() {
-    const scaleMultiplier = document.getElementById('scaleMultiplier');
-    const scaleDescription = document.getElementById('scaleDescription');
-    
-    if (currentChartScale === 'linear') {
-        if (scaleMultiplier) scaleMultiplier.textContent = `${currentThresholdMultiplier.toFixed(1)}x`;
-        if (scaleDescription) {
-            if (currentThresholdMultiplier < 1) {
-                scaleDescription.textContent = 'More sensitive';
-            } else if (currentThresholdMultiplier > 1) {
-                scaleDescription.textContent = 'Less sensitive';
-            } else {
-                scaleDescription.textContent = 'Base threshold';
-            }
-        }
-    } else {
-        const minValue = currentLogMin || 0.1;
-        if (scaleMultiplier) scaleMultiplier.textContent = `${minValue}`;
-        if (scaleDescription) scaleDescription.textContent = 'Log minimum';
-    }
-}
-
-function updateToggleAppearance(scale) {
-    const toggleBtn = document.getElementById('scaleToggle');
-    if (!toggleBtn) return;
-    
-    const linearOption = toggleBtn.querySelector('.toggle-option:first-child');
-    const logOption = toggleBtn.querySelector('.toggle-option:last-child');
-    
-    if (scale === 'linear') {
-        linearOption.classList.add('active');
-        logOption.classList.remove('active');
-        toggleBtn.setAttribute('data-scale', 'linear');
-    } else {
-        linearOption.classList.remove('active');
-        logOption.classList.add('active');
-        toggleBtn.setAttribute('data-scale', 'logarithmic');
-    }
-}
-
-function updateChartScale() {
-    if (!window.amplificationChart || !window.amplificationChart.options) return;
-    
-    // Store current annotation data before updating
-    const currentAnnotations = window.amplificationChart.options.plugins?.annotation?.annotations || {};
-    
-    // Get new scale configuration
-    const newScaleConfig = getScaleConfiguration();
-    
-    // Update the y-axis configuration
-    if (window.amplificationChart.options.scales) {
-        window.amplificationChart.options.scales.y = newScaleConfig;
-    }
-    
-    // For logarithmic scale, ensure all data points are visible
-    if (currentChartScale === 'logarithmic') {
-        // Process datasets to handle zero or negative values
-        if (window.amplificationChart.data && window.amplificationChart.data.datasets) {
-            window.amplificationChart.data.datasets.forEach(dataset => {
-                if (dataset.data) {
-                    dataset.data = dataset.data.map(point => ({
-                        x: point.x,
-                        y: Math.max(point.y, currentLogMin) // Use slider minimum value
-                    }));
-                }
-            });
-        }
-        
-        // Adjust threshold annotations for log scale visibility
-        Object.keys(currentAnnotations).forEach(key => {
-            if (currentAnnotations[key].type === 'line' && currentAnnotations[key].yMin !== undefined) {
-                const thresholdValue = currentAnnotations[key].yMin;
-                // Ensure threshold is visible on log scale but above minimum
-                const adjustedThreshold = Math.max(thresholdValue, currentLogMin * 2);
-                currentAnnotations[key].yMin = adjustedThreshold;
-                currentAnnotations[key].yMax = adjustedThreshold;
-                
-                // Update label to show adjusted value
-                if (currentAnnotations[key].label) {
-                    currentAnnotations[key].label.content = `Threshold: ${adjustedThreshold.toFixed(2)}`;
-                }
-            }
-        });
-    }
-    
-    // Restore annotations
-    if (Object.keys(currentAnnotations).length > 0 && window.amplificationChart.options.plugins) {
-        window.amplificationChart.options.plugins.annotation = { annotations: currentAnnotations };
-    }
-    
-    // Update chart with animation disabled for smooth transition
-    window.amplificationChart.update('none');
-    
-    console.log(`Chart scale updated to: ${currentChartScale}, min: ${currentLogMin}`);
-}
-
+// --- Chart Configuration Functions ---
 function createChartConfiguration(chartType, datasets, title, annotation = null) {
     const scaleConfig = getScaleConfiguration();
     
@@ -9195,7 +9398,7 @@ function createChartConfiguration(chartType, datasets, title, annotation = null)
                     position: 'top'
                 },
                 tooltip: {
-                    enabled: datasets.length <= 20 // Disable for performance with many curves
+                    enabled: datasets.length <= 20
                 },
                 ...(annotation ? { annotation } : {})
             },
@@ -9231,55 +9434,74 @@ function getScaleConfiguration() {
     const baseConfig = {
         title: { 
             display: true, 
+            text: 'RFU',
             font: { size: 14, weight: 'bold' }
         },
         grid: { color: 'rgba(0,0,0,0.1)' }
     };
     
-    if (currentChartScale === 'logarithmic') {
+    if (currentScaleMode === 'log') {
         return {
             ...baseConfig,
             type: 'logarithmic',
-            min: currentLogMin, // Use slider value for log minimum
-            title: { 
-                ...baseConfig.title,
-                text: `RFU (log scale, min: ${currentLogMin})`
-            },
-            ticks: {
-                callback: function(value, index, values) {
-                    // Custom tick formatting for better readability
-                    if (value >= 1000) {
-                        return (value / 1000).toFixed(0) + 'k';
-                    } else if (value >= 1) {
-                        return value.toFixed(0);
-                    } else {
-                        return value.toFixed(1);
-                    }
-                }
-            }
+            min: Math.max(currentThresholdMultiplier * 0.1, 0.1),
+            max: 100000
         };
     } else {
         return {
             ...baseConfig,
             type: 'linear',
-            title: { 
-                ...baseConfig.title,
-                text: `RFU (Linear, ${currentThresholdMultiplier.toFixed(1)}x threshold)`
-            },
-            min: function(context) {
-                const data = context.chart.data.datasets[0]?.data;
-                if (!data || data.length === 0) return 0;
-                const minVal = Math.min(...data.map(point => point.y));
-                return minVal - (minVal * 0.15);
-            },
-            max: function(context) {
-                const data = context.chart.data.datasets[0]?.data;
-                if (!data || data.length === 0) return 100;
-                const maxVal = Math.max(...data.map(point => point.y));
-                return maxVal + (maxVal * 0.15);
-            }
+            min: 0,
+            max: Math.max(1000 * currentThresholdMultiplier, 1000)
         };
     }
+}
+
+function updateChartWithThreshold(threshold, fluorophore) {
+    // Legacy function - redirect to new system
+    if (!window.amplificationChart || !window.amplificationChart.options) return;
+    
+    const annotations = {
+        thresholdLine: createThresholdAnnotation(threshold, fluorophore)
+    };
+    
+    if (window.amplificationChart.options.plugins) {
+        window.amplificationChart.options.plugins.annotation = { annotations };
+    }
+    window.amplificationChart.update('none');
+}
+
+
+// --- Enhanced Chart Scale Toggle Functionality ---
+let currentLogMin = 0.1; // Default log minimum for backward compatibility
+// (Removed duplicate threshold variables; use the global ones at the top of the file)
+
+function initializeChartToggle() {
+    const toggleBtn = document.getElementById('scaleToggle');
+    if (!toggleBtn) return;
+    
+    // Initialize from sessionStorage if available
+    const savedScale = sessionStorage.getItem('qpcr_chart_scale');
+    const savedMultiplier = sessionStorage.getItem('qpcr_threshold_multiplier');
+    
+    if (savedScale && (savedScale === 'linear' || savedScale === 'log' || savedScale === 'logarithmic')) {
+        // Handle legacy 'logarithmic' value
+        currentScaleMode = savedScale === 'logarithmic' ? 'log' : savedScale;
+        console.log(`🔍 INIT - Loaded scale from session: ${currentScaleMode}`);
+    }
+    
+    if (savedMultiplier) {
+        currentThresholdMultiplier = parseFloat(savedMultiplier);
+        console.log(`🔍 INIT - Loaded multiplier from session: ${currentThresholdMultiplier}`);
+    }
+    
+    // Toggle button event listener (use the existing onScaleToggle function)
+    toggleBtn.addEventListener('click', onScaleToggle);
+    
+    // Initialize the UI to match the current scale mode
+    updateSliderUI();
+    
+    console.log(`🔍 INIT - Chart toggle initialized with scale: ${currentScaleMode}`);
 }
 
 // Initialize chart toggle when DOM is ready
@@ -9612,28 +9834,32 @@ function createModalChart(wellKey, wellData) {
         });
     }
     
-    // Prepare annotation for threshold if present
+    // Prepare annotation for channel-based threshold
     let annotation = undefined;
-    if (wellData && wellData.threshold_value != null && !isNaN(wellData.threshold_value)) {
-        annotation = {
-            annotations: {
-                threshold: {
-                    type: 'line',
-                    yMin: wellData.threshold_value,
-                    yMax: wellData.threshold_value,
-                    borderColor: 'black',
-                    borderWidth: 2,
-                    label: {
-                        display: true,
-                        content: 'threshold',
-                        color: 'black',
-                        backgroundColor: 'white',
-                        position: 'end',
-                        font: { weight: 'bold' }
+    if (wellData && wellData.fluorophore) {
+        const threshold = getCurrentChannelThreshold(wellData.fluorophore, currentScaleMode);
+        if (threshold != null && !isNaN(threshold)) {
+            annotation = {
+                annotations: {
+                    threshold: {
+                        type: 'line',
+                        yMin: threshold,
+                        yMax: threshold,
+                        borderColor: getFluorophoreColor(wellData.fluorophore),
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        label: {
+                            display: true,
+                            content: `${wellData.fluorophore} threshold: ${threshold.toFixed(2)}`,
+                            color: getFluorophoreColor(wellData.fluorophore),
+                            backgroundColor: 'rgba(255,255,255,0.8)',
+                            position: 'start',
+                            font: { size: 10, weight: 'bold' }
+                        }
                     }
                 }
-            }
-        };
+            };
+        }
     }
     modalChart = new Chart(ctx, {
         type: 'scatter',
@@ -9777,21 +10003,36 @@ document.addEventListener('DOMContentLoaded', function() {
     const analyzeBtn = document.getElementById('analyzeBtn');
     
     if (fileInput) {
+        console.log('🔍 FILE-INPUT - Setting up file input event listener');
         fileInput.addEventListener('change', function(e) {
+            console.log('🔍 FILE-INPUT - File input change event triggered', e.target.files);
             if (e.target.files.length > 0) {
+                console.log(`🔍 FILE-INPUT - Processing ${e.target.files.length} files`);
                 for (let i = 0; i < e.target.files.length; i++) {
+                    console.log(`🔍 FILE-INPUT - Processing file ${i + 1}: ${e.target.files[i].name}`);
                     handleFileUpload(e.target.files[i], 'amplification');
                 }
+            } else {
+                console.warn('🔍 FILE-INPUT - No files selected');
             }
         });
+    } else {
+        console.error('🔍 FILE-INPUT - fileInput element not found!');
     }
     
     if (samplesInput) {
+        console.log('🔍 SAMPLES-INPUT - Setting up samples input event listener');
         samplesInput.addEventListener('change', function(e) {
+            console.log('🔍 SAMPLES-INPUT - Samples input change event triggered', e.target.files);
             if (e.target.files.length > 0) {
+                console.log(`🔍 SAMPLES-INPUT - Processing samples file: ${e.target.files[0].name}`);
                 handleFileUpload(e.target.files[0], 'samples');
+            } else {
+                console.warn('🔍 SAMPLES-INPUT - No samples file selected');
             }
         });
+    } else {
+        console.error('🔍 SAMPLES-INPUT - samplesInput element not found!');
     }
     
     if (analyzeBtn) {

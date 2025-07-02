@@ -99,30 +99,41 @@
 
             <div class="chart-controls">
                 <div class="scale-controls">
-                    <div class="scale-mode">
-                        <label for="scaleToggle">Y-Axis Scale:</label>
-                        <button class="toggle-btn" id="scaleToggle" data-scale="linear">
-                            <span class="toggle-option active">Linear</span>
-                            <span class="toggle-option">Log</span>
-                        </button>
-                    </div>
-                    <div class="scale-range" id="scaleRangeContainer">
-                        <label for="scaleRangeSlider"><span id="scaleRangeLabel">Linear Range:</span></label>
-                        <div class="slider-container">
-                            <input type="range" id="scaleRangeSlider" min="0.1" max="100" value="10" step="0.1" class="scale-slider">
-                            <div class="slider-labels">
-                                <span class="slider-label">Threshold Scale: <span id="scaleMultiplier">1.0x</span></span>
-                                <span class="slider-label" id="scaleDescription">Base threshold</span>
+                    <!-- Row 1: Scale Mode and Baseline -->
+                    <div class="controls-row-1">
+                        <div class="scale-mode">
+                            <label for="scaleToggle">Y-Axis:</label>
+                            <button class="toggle-btn" id="scaleToggle" data-scale="linear">
+                                <span class="toggle-option active">Linear</span>
+                                <span class="toggle-option">Log</span>
+                            </button>
+                        </div>
+                        <div class="baseline-flattening" id="baselineFlatteningContainer">
+                            <label for="baselineToggle">Baseline:</label>
+                            <button class="toggle-btn" id="baselineToggle" data-enabled="false" title="CFX Manager 3.1 style: Flatten non-S-curves only, preserve positive amplification">
+                                <span class="toggle-option active">Off</span>
+                                <span class="toggle-option">CFX Style</span>
+                            </button>
+                        </div>
+                        <div class="scale-presets" id="scalePresetsContainer">
+                            <label>Threshold:</label>
+                            <div class="preset-buttons">
+                                <button class="preset-btn" data-value="0.5" data-desc="Conservative">0.5x</button>
+                                <button class="preset-btn" data-value="1.0" data-desc="Standard" class="active">1.0x</button>
+                                <button class="preset-btn" data-value="2.0" data-desc="Strict">2.0x</button>
+                                <button class="preset-btn" data-value="5.0" data-desc="Very Strict">5.0x</button>
                             </div>
                         </div>
                     </div>
-                    <div class="scale-presets" id="scalePresetsContainer">
-                        <label>Presets:</label>
-                        <div class="preset-buttons">
-                            <button class="preset-btn" data-value="0.5" data-desc="Conservative">0.5x</button>
-                            <button class="preset-btn" data-value="1.0" data-desc="Standard" class="active">1.0x</button>
-                            <button class="preset-btn" data-value="2.0" data-desc="Strict">2.0x</button>
-                            <button class="preset-btn" data-value="5.0" data-desc="Very Strict">5.0x</button>
+                    <!-- Row 2: Range Slider (optional, shows when needed) -->
+                    <div class="controls-row-2" id="scaleRangeContainer" style="display: none;">
+                        <div class="scale-range">
+                            <label for="scaleRangeSlider"><span id="scaleRangeLabel">Threshold Scale:</span></label>
+                            <div class="slider-container">
+                                <input type="range" id="scaleRangeSlider" min="0.1" max="100" value="10" step="0.1" class="scale-slider">
+                                <span class="slider-value" id="scaleMultiplier">1.0x</span>
+                                <span class="slider-description" id="scaleDescription">Adjust threshold sensitivity</span>
+                            </div>
                         </div>
                     </div>
                 </div>
