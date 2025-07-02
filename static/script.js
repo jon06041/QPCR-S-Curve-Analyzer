@@ -10688,6 +10688,7 @@ function extractTestCodeFromSession(sessionFilename) {
 }
 
 
+/* TEST 1: COMMENTED OUT - createIndividualPathogenGrid (HTML string version)
 function createIndividualPathogenGrid(pathogenName, controlSets, gridIndex) {
     const setCount = Object.keys(controlSets).length;
     
@@ -10782,6 +10783,7 @@ function populatePathogenGrids(controlSets, pathogenTargets) {
         });
     });
 }
+END TEST 1 COMMENT */
 
 function getPathogenTargets(testName) {
     // Map test names to their pathogen targets
