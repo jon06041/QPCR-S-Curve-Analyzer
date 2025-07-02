@@ -99,7 +99,7 @@
 
             <div class="chart-controls">
                 <div class="scale-controls">
-                    <!-- Row 1: Scale Mode and Baseline -->
+                    <!-- Single row: All controls on one line -->
                     <div class="controls-row-1">
                         <div class="scale-mode">
                             <label for="scaleToggle">Y-Axis:</label>
@@ -111,8 +111,8 @@
                         <div class="baseline-flattening" id="baselineFlatteningContainer">
                             <label for="baselineToggle">Baseline:</label>
                             <button class="toggle-btn" id="baselineToggle" data-enabled="false" title="CFX Manager 3.1 style: Flatten non-S-curves only, preserve positive amplification">
-                                <span class="toggle-option active">Off</span>
-                                <span class="toggle-option">CFX Style</span>
+                                <span class="toggle-option active">Baseline Off</span>
+                                <span class="toggle-option">Baseline CFX Style</span>
                             </button>
                         </div>
                         <div class="scale-presets" id="scalePresetsContainer">
@@ -124,15 +124,11 @@
                                 <button class="preset-btn" data-value="5.0" data-desc="Very Strict">5.0x</button>
                             </div>
                         </div>
-                    </div>
-                    <!-- Row 2: Range Slider (optional, shows when needed) -->
-                    <div class="controls-row-2" id="scaleRangeContainer" style="display: none;">
-                        <div class="scale-range">
-                            <label for="scaleRangeSlider"><span id="scaleRangeLabel">Threshold Scale:</span></label>
+                        <div class="scale-range" id="scaleRangeContainer">
+                            <label for="scaleRangeSlider"><span id="scaleRangeLabel">Scale:</span></label>
                             <div class="slider-container">
                                 <input type="range" id="scaleRangeSlider" min="0.1" max="100" value="10" step="0.1" class="scale-slider">
                                 <span class="slider-value" id="scaleMultiplier">1.0x</span>
-                                <span class="slider-description" id="scaleDescription">Adjust threshold sensitivity</span>
                             </div>
                         </div>
                     </div>
@@ -283,7 +279,6 @@
                 <h2>Analysis History</h2>
                 <div class="history-controls" style="margin-top: 15px; display: flex; gap: 10px;">
                     <button class="control-btn trend-btn" id="trendAnalysisBtn" onclick="viewTrendAnalysis()">View Trends</button>
-                    <button class="control-btn" id="clearAllHistoryBtn" onclick="clearAllHistory()">Clear All History</button>
                 </div>
             </div>
             
@@ -334,55 +329,6 @@
             newLink.href = link.href.split('?')[0] + '?v=' + Date.now();
             link.parentNode.insertBefore(newLink, link.nextSibling);
             link.remove();
-        }
-    });
-    
-    // Only one Clear All History logic should exist
-    function clearAllHistory() {
-        if (confirm('Are you sure you want to clear all analysis history? This will delete both local and server history and cannot be undone.')) {
-            try {
-                localStorage.removeItem('qpcrAnalysisHistory');
-                console.log('[ClearAllHistory] localStorage.qpcrAnalysisHistory removed.');
-                // Double-check removal
-                if (!localStorage.getItem('qpcrAnalysisHistory')) {
-                    console.log('[ClearAllHistory] Confirmed: qpcrAnalysisHistory is now null.');
-                } else {
-                    console.warn('[ClearAllHistory] qpcrAnalysisHistory still present:', localStorage.getItem('qpcrAnalysisHistory'));
-                }
-                // --- NEW: Also clear server-side history ---
-                fetch('/sessions', { method: 'DELETE' })
-                    .then(res => res.json())
-                    .then(data => {
-                        console.log('[ClearAllHistory] Server response:', data);
-                        if (typeof loadAnalysisHistory === 'function') {
-                            loadAnalysisHistory();
-                        } else if (document.getElementById('historyContent')) {
-                            document.getElementById('historyContent').innerHTML = '<p>No analysis history available.</p>';
-                        }
-                        setTimeout(function() {
-                            location.reload();
-                        }, 500);
-                    })
-                    .catch(e => {
-                        alert('Error clearing server history: ' + e.message);
-                        console.error('[ClearAllHistory] Server exception:', e);
-                        location.reload();
-                    });
-            } catch (e) {
-                alert('Error clearing history: ' + e.message);
-                console.error('[ClearAllHistory] Exception:', e);
-                location.reload();
-            }
-        }
-    }
-    // Remove any duplicate or legacy Clear History buttons on DOMContentLoaded
-    document.addEventListener('DOMContentLoaded', function() {
-        const allClearBtns = document.querySelectorAll('#clearAllHistoryBtn');
-        if (allClearBtns.length > 1) {
-            // Keep the first, remove the rest
-            for (let i = 1; i < allClearBtns.length; i++) {
-                allClearBtns[i].parentNode.removeChild(allClearBtns[i]);
-            }
         }
     });
     </script>

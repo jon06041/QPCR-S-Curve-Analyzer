@@ -932,43 +932,23 @@ body {
     align-items: flex-end;
 }
 
-/* Compact layout - Row 1: Main controls */
+/* Compact layout - Single row with all controls */
 .controls-row-1 {
     display: flex;
     align-items: center;
-    gap: 20px;
-    flex-wrap: wrap;
-}
-
-/* Compact layout - Row 2: Optional slider */
-.controls-row-2 {
-    display: flex;
-    align-items: center;
     gap: 15px;
-    margin-top: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
 }
 
-.scale-mode, .baseline-flattening {
+.scale-mode, .baseline-flattening, .scale-presets, .scale-range {
     display: flex;
     align-items: center;
     gap: 8px;
 }
 
-.scale-mode label, .baseline-flattening label {
-    font-size: 0.9rem;
-    font-weight: 600;
-    color: #2c3e50;
-    white-space: nowrap;
-}
-
-.scale-presets {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.scale-presets label {
-    font-size: 0.9rem;
+.scale-mode label, .baseline-flattening label, .scale-presets label, .scale-range label {
+    font-size: 0.85rem;
     font-weight: 600;
     color: #2c3e50;
     white-space: nowrap;
@@ -976,17 +956,18 @@ body {
 
 .preset-buttons {
     display: flex;
-    gap: 4px;
+    gap: 3px;
 }
 
 .preset-btn {
-    padding: 4px 8px;
-    font-size: 0.8rem;
+    padding: 3px 6px;
+    font-size: 0.75rem;
     border: 1px solid #dee2e6;
     background: white;
-    border-radius: 4px;
+    border-radius: 3px;
     cursor: pointer;
     transition: all 0.2s ease;
+    min-width: 32px;
 }
 
 .preset-btn:hover, .preset-btn.active {
@@ -995,26 +976,46 @@ body {
     border-color: #007bff;
 }
 
-.scale-range {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
 .slider-container {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
 }
 
 .scale-slider {
-    width: 120px;
+    width: 80px;
+    height: 4px;
 }
 
-.slider-value, .slider-description {
-    font-size: 0.8rem;
+.slider-value {
+    font-size: 0.75rem;
     color: #6c757d;
     white-space: nowrap;
+    min-width: 30px;
+}
+
+/* Toggle button compact styling */
+.toggle-btn {
+    display: flex;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    overflow: hidden;
+    font-size: 0.75rem;
+}
+
+.toggle-option {
+    padding: 4px 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: transparent;
+    border: none;
+    font-size: inherit;
+}
+
+.toggle-option.active {
+    background: #007bff;
+    color: white;
 }
 
 .baseline-description {
