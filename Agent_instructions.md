@@ -1,32 +1,62 @@
-# Agent Instructions: Multi-Fluorophore qPCR Analysis - EXPERIMENT ISOLATION V2
+# Agent Instructions: Multi-Fluorophore qPCR Analysis - DATA CONTAMINATION FIXED
 
-## 🚨 CRITICAL: READ THIS FIRST - Data Contamination Prevention
+## 🚨 CRITICAL: READ THIS FIRST - Data Contamination Prevention (COMPLETED 2025-01-03)
 
-### MANDATORY: Review `/docs/DATA_CONTAMINATION_FIX.md` Before ANY Changes
-**The application has a comprehensive data contamination prevention system that MUST be followed.**
+### ✅ DATA CONTAMINATION FIX IMPLEMENTED AND MERGED TO MAIN
 
-**Key Rules (NEVER BREAK THESE):**
-1. **NEVER directly assign to global analysis variables** - Use `setAnalysisResults()` instead
-2. **History functions must not contaminate state** - Use `displayHistorySession()` for view-only
-3. **Emergency reset available** - `emergencyReset()` function clears ALL data when needed
-4. **Auto-reset on history** - `loadSessionDetails()` automatically resets before loading
+**COMPLETED ON**: January 3, 2025
+**STATUS**: MERGED TO MAIN BRANCH  
+**ISSUE**: Data contamination between experiments and history sessions
+**SOLUTION**: Comprehensive prevention system with emergency reset and isolation
 
-**Quick Reference:**
-- ✅ `setAnalysisResults(data, 'source')` - Safe state setting
-- ✅ `displayHistorySession(data)` - View history without contamination  
-- ✅ `emergencyReset()` - Nuclear option to clear everything
-- ❌ `currentAnalysisResults = data` - PROHIBITED direct assignment
-- ❌ `window.currentAnalysisResults = data` - PROHIBITED direct assignment
+#### 🛡️ CONTAMINATION PREVENTION SYSTEM ACTIVE:
+
+**1. Emergency Reset Function:**
+- `emergencyReset()` - Nuclear option button (🔄 RESET EVERYTHING) in header
+- Clears ALL global variables, UI elements, and state
+- Called automatically before loading any history session
+- Manual button available for user-initiated reset
+
+**2. Protected State Management:**
+- `setAnalysisResults(data, source)` - Safe way to set analysis results
+- `displayHistorySession(data)` - View history without contaminating current state
+- `loadFromHistoryExplicit(data, source)` - Explicit user-initiated history loading
+- Blocks unwanted background contamination
+
+**3. Session Loading Protection:**
+- `loadSessionDetails()` - Auto-calls `emergencyReset()` before loading
+- `loadLocalSessionDetails()` - Uses non-contaminating display functions
+- `displaySessionResults()` - Uses history display without state pollution
+- Prevents old session data from polluting new experiments
+
+**4. Key Functions:**
+```javascript
+// ✅ SAFE - Use these functions
+emergencyReset()                    // Clear everything
+setAnalysisResults(data, source)    // Safe state setting  
+displayHistorySession(data)         // View history without contamination
+loadFromHistoryExplicit(data)       // User-initiated history loading
+
+// ❌ PROHIBITED - Never use direct assignment
+currentAnalysisResults = data       // FORBIDDEN
+window.currentAnalysisResults = data // FORBIDDEN
+```
+
+**5. Testing Confirmed:**
+- Manual reset button works correctly
+- History viewing doesn't contaminate fresh analysis
+- New analysis sessions remain clean
+- Old data cannot pollute new experiments
 
 ---
 
-## CURRENT STATUS (July 3, 2025 - DATA CONTAMINATION FIX COMPLETED)
+## CURRENT STATUS (January 3, 2025 - NEW BRANCH FOR THRESHOLD INTEGRITY)
 
-### 🔄 TASK IN PROGRESS: Experiment Isolation Fix - Version 2
+### 🔄 NEXT TASK: Threshold Integrity and Statistics Fix
 
-**Objective**: Implement robust experiment isolation to prevent cross-contamination between experiments
-**Method**: Incremental, test-driven approach with proper branching and rollback capability
-**Current Branch**: `fix/experiment-isolation-v2` (created from `fix-threshold-pathogen-tabs`)
+**Objective**: Fix threshold calculation accuracy and statistics display
+**Current Branch**: `fix/threshold-integrity-stats` 
+**Previous**: Data contamination fix merged to main successfully
 
 #### 🎯 RESTORATION COMPLETED:
 - **Restored from**: `fix-threshold-pathogen-tabs` (last known working state)
@@ -68,56 +98,40 @@
 - Database became readonly/empty (0 bytes)
 - Application remained broken even after code restoration
 
-**✅ WORKING RESTORATION:**
-- Full branch restoration to `fix-threshold-pathogen-tabs`
-- Database restored to working state (28KB)
-- Clean JavaScript with no errors
-- Ready for incremental approach
+#### 🎯 THRESHOLD INTEGRITY FOCUS AREAS:
 
-#### 📋 NEW APPROACH - INCREMENTAL & TEST-DRIVEN:
+**1. Threshold Calculation Accuracy:**
+- Per-channel threshold calculation using all wells (not just displayed)
+- Stable threshold values across different chart views
+- Proper NTC control well identification and usage
+- Consistent log vs linear threshold calculations
 
-**Phase 1: Investigation & Understanding**
-1. ✅ Restore to known good branch (`fix-threshold-pathogen-tabs`)
-2. ✅ Create new branch (`fix/experiment-isolation-v2`)
-3. ✅ Analyze current data flow and UI update patterns
-4. ✅ Identify specific contamination points
-5. ✅ Create test scenarios for validation
+**2. Statistics Display Integrity:**
+- Accurate patient vs control sample separation
+- Correct positive/negative percentages
+- Reliable fluorophore-specific breakdowns
+- Proper cycle range calculations
 
-**Phase 2: Targeted Fixes**
-1. ✅ Implement minimal, surgical changes to specific UI components
-2. ✅ Test each change individually before proceeding
-3. ✅ Focus on data source filtering rather than universal filtering
-4. ✅ Maintain chart initialization and UI functionality
+**3. Chart Annotation Stability:**
+- Threshold lines maintain correct positions
+- Multi-channel threshold display accuracy
+- Scale changes preserve threshold integrity
+- Annotation plugin compatibility
 
-**COMPLETED FIXES:**
-- ✅ **Fresh Upload Clearing**: Fixed order of clearPreviousExperimentData() calls
-- ✅ **History Load Clearing**: Added clearing calls to loadSessionDetails() and displaySessionResults()
-- ✅ **Global Variable Management**: Prevented clearing of variables that are immediately reset
+#### � DATA CONTAMINATION FIX DETAILS (REFERENCE):
 
-**Phase 3: Validation & Documentation**
-1. Test all experiment switching scenarios
-2. Verify no cross-contamination in any UI component
-3. Document final solution and test protocols
-4. Commit and merge when fully validated
+**COMPLETED CHANGES (2025-01-03):**
+- Added `emergencyReset()` function with manual button
+- Implemented `displayHistorySession()` for non-contaminating history viewing
+- Modified `loadSessionDetails()` to auto-reset before loading
+- Updated `loadLocalSessionDetails()` and `displaySessionResults()` to use safe display
+- Replaced all direct assignments to `currentAnalysisResults` with protected functions
+- Added protected `setAnalysisResults()` function for safe state management
 
-#### 🔧 CRITICAL PROTOCOLS:
-
-**ALWAYS BEFORE CHANGES:**
-1. Create a new branch from last known good state
-2. Document expected changes and test criteria
-3. Test current functionality to establish baseline
-
-**DURING IMPLEMENTATION:**
-1. Make one small change at a time
-2. Test immediately after each change
-3. Commit working states, stash broken states
-4. Never implement universal/global changes without targeted testing
-
-**TESTING PROTOCOL:**
-✅ **COMPLETED FIXES:**
-- Fresh upload clearing: Fixed order of clearPreviousExperimentData() calls
-- History load clearing: Added clearing to loadSessionDetails() and displaySessionResults()
-- Global variable management: Prevented premature clearing of analysis results
+**FILES MODIFIED:**
+- `static/script.js` - Main contamination prevention logic
+- `index.html` - Added emergency reset button
+- `Agent_instructions.md` - Updated with fix documentation
 
 🧪 **VALIDATION TESTS:**
 1. Upload a multi-channel experiment → verify all channels appear
@@ -166,8 +180,27 @@
 
 ---
 
-*Last updated: July 2, 2025 - Phase 2 Complete*
-*Next Phase: Chart.js Optimization & User Experience Enhancement*
+## 🔄 AGENT WORKFLOW FOR FUTURE FIXES:
+
+**MANDATORY STEPS FOR ANY NEW AGENT:**
+1. **Read this document completely** - Understand the contamination fix system
+2. **Test the emergency reset** - Verify `emergencyReset()` button works
+3. **Check protected functions** - Ensure `setAnalysisResults()` and `displayHistorySession()` exist
+4. **Never bypass contamination protection** - Use safe functions, never direct assignments
+5. **Create targeted branches** - Use specific fix branches, merge to main when stable
+
+**BRANCH NAMING CONVENTION:**
+- `fix/[specific-issue-name]` - For targeted fixes
+- Test thoroughly before merging to main
+- Document all changes in commit messages with date stamps
+
+**CURRENT ACTIVE BRANCH**: `fix/threshold-integrity-stats`
+**LAST MAJOR FIX**: Data contamination prevention (2025-01-03) - COMPLETED
+
+---
+
+*Last updated: January 3, 2025 - Data Contamination Fix Completed & Merged*
+*Current Focus: Threshold Integrity and Statistics Accuracy*
 
 ## Overview
 This document provides comprehensive instructions and findings from debugging and improving the multi-fluorophore (multi-channel) qPCR analysis workflow. The main goal was to ensure all channels (Cy5, FAM, HEX, Texas Red) are processed, combined, and displayed correctly.
@@ -790,60 +823,3 @@ function applyBaselineFlattening(rawData, enableFlattening) {
     // Apply CFX Manager-style noise reduction
 }
 ```
-
-### 🔍 DEBUGGING CHECKLIST
-
-#### When Testing Threshold Display:
-- [ ] Script.js loads without console errors
-- [ ] Chart.js annotation plugin is registered
-- [ ] `initializeChannelThresholds()` finds channels correctly
-- [ ] Threshold values are calculated and stored
-- [ ] Chart annotations are created and applied
-- [ ] Threshold lines appear on chart
-
-#### When Testing Multi-Channel Analysis:
-- [ ] All fluorophore files upload successfully
-- [ ] Sequential processing completes without errors
-- [ ] Channel objects have proper structure
-- [ ] Combined results include all channels
-- [ ] Threshold system works for each channel
-
-#### When Testing New Features:
-- [ ] Baseline flattening toggle appears in linear mode only
-- [ ] Toggle state persists across chart updates
-- [ ] Noise reduction affects cycles 1-5 only
-- [ ] S-curve amplification region unchanged
-- [ ] Real-time updates work correctly
-
-### 💻 COMPUTER SWITCH HANDOFF SUMMARY
-
-**What's Working**:
-✅ Multi-fluorophore sequential processing
-✅ Control grid display system  
-✅ Mock backend for testing without Flask
-✅ Mathematical threshold calculations implemented
-✅ Chart.js integration framework in place
-
-**What Needs Immediate Attention**:
-❌ Threshold lines not appearing on charts
-❌ Channel object structure implementation
-❌ CFX Manager baseline flattening feature
-❌ Full threshold system debugging and testing
-
-**Critical Files**:
-- `static/script.js` - Main frontend logic (threshold system 80% complete)
-- `Agent_instructions.md` - Complete documentation (THIS FILE)
-- `app.py` - Flask backend with qPCR analysis
-- `index.html` - UI structure (needs baseline toggle)
-
-**Testing Approach**:
-1. Start with Flask backend (port 5002) for full functionality
-2. Fall back to static server (port 8000) for UI testing with mock data
-3. Use browser dev tools to debug threshold calculations
-4. Test with real qPCR CSV files for final validation
-
-**Next Session Goals**:
-1. Get threshold lines displaying correctly
-2. Implement proper channel object passing
-3. Add CFX Manager baseline flattening feature
-4. Complete testing and validation of entire system
