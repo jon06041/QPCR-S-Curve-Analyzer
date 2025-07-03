@@ -1726,81 +1726,58 @@ let currentChartMode = 'all'; // Track current chart display mode
  * This prevents cross-contamination when switching between experiments
  */
 function clearPreviousExperimentData() {
-    console.log('🧹 Clearing previous experiment data to prevent contamination...');
+    console.log('🧹 [CLEARING] Starting comprehensive experiment data clearing...');
     
-    // 1. Clear Global State (but don't reset to null if we're about to set new data)
-    // Reset filter states
-    currentFilterMode = 'all';
-    currentFluorophore = 'all';
-    currentChartMode = 'all';
+    // Use the existing comprehensive cache clearing function
+    clearCachedData();
     
-    // 2. Clear Results Table
-    const resultsTableBody = document.querySelector('#resultsTable tbody');
-    if (resultsTableBody) {
-        resultsTableBody.innerHTML = '';
-    }
+    // Additional clearing for experiment-specific UI elements not covered by clearCachedData
     
-    // 3. Clear Well Selector Dropdown
-    const wellSelector = document.getElementById('wellSelector');
-    if (wellSelector) {
-        wellSelector.innerHTML = '<option value="">Select a well...</option>';
-    }
-    
-    // 4. Clear Fluorophore Selector
-    const fluorophoreSelector = document.getElementById('fluorophoreSelector');
-    if (fluorophoreSelector) {
-        fluorophoreSelector.innerHTML = '<option value="all">All Fluorophores</option>';
-    }
-    
-    // 5. Clear Chart
-    if (window.amplificationChart && typeof window.amplificationChart.destroy === 'function') {
-        window.amplificationChart.destroy();
-        window.amplificationChart = null;
-    } else if (window.amplificationChart) {
-        // If destroy method doesn't exist, just clear the reference
-        window.amplificationChart = null;
-    }
-    
-    // 6. Clear Modal State
-    const modal = document.getElementById('chartModal');
-    if (modal) {
-        modal.style.display = 'none';
-    }
-    
-    // 7. Clear Control Grids
-    const controlGridsContainer = document.getElementById('pathogenControlGrids');
-    if (controlGridsContainer) {
-        controlGridsContainer.innerHTML = '';
-        controlGridsContainer.style.display = 'none';
-    }
-    
-    // 8. Clear Analysis Summary
-    clearAnalysisSummary();
-    
-    // 9. Clear Control Validation Alerts (prevent contamination from previous experiments)
+    // Clear Control Validation Alerts (prevent contamination from previous experiments)
     const controlValidationContainer = document.getElementById('controlValidationAlerts');
     if (controlValidationContainer) {
+        console.log('🔍 [CLEARING] Found control validation container with content:', {
+            hadContent: controlValidationContainer.innerHTML.length > 0,
+            wasVisible: controlValidationContainer.style.display !== 'none'
+        });
         controlValidationContainer.innerHTML = '';
         controlValidationContainer.style.display = 'none';
+        console.log('🧹 [CLEARING] Cleared control validation alerts container');
+    } else {
+        console.log('🔍 [CLEARING] No control validation container found to clear');
     }
     
-    // 10. Clear Channel Processing Status (prevent contamination from previous multi-channel processing)
+    // Clear Channel Processing Status (prevent contamination from previous multi-channel processing)
     const channelStatusContainer = document.getElementById('channel-processing-status');
     if (channelStatusContainer) {
         channelStatusContainer.innerHTML = '';
         channelStatusContainer.style.display = 'none';
+        console.log('🧹 [CLEARING] Cleared channel processing status container');
     }
     
-    // 11. Clear Selected Curve Details
+    // Clear Control Grids
+    const controlGridsContainer = document.getElementById('pathogenControlGrids');
+    if (controlGridsContainer) {
+        controlGridsContainer.innerHTML = '';
+        controlGridsContainer.style.display = 'none';
+        console.log('🧹 [CLEARING] Cleared pathogen control grids container');
+    }
+    
+    // Clear Selected Curve Details
     const curveDetailsContainer = document.querySelector('.curve-details-content');
     if (curveDetailsContainer) {
         curveDetailsContainer.innerHTML = '<p>No curve selected. Click on a row in the results table to view details.</p>';
+        console.log('🧹 [CLEARING] Cleared curve details container');
     }
     
-    // 10. Reset Filter Buttons
-    resetFilterButtons();
+    // Clear any persisting experiment pattern displays
+    const experimentPattern = document.getElementById('experimentPattern');
+    if (experimentPattern) {
+        experimentPattern.textContent = '--';
+        console.log('🧹 [CLEARING] Cleared experiment pattern display');
+    }
     
-    console.log('✅ Previous experiment data cleared successfully');
+    console.log('✅ [CLEARING] Comprehensive experiment data clearing complete');
 }
 
 /**
@@ -7269,6 +7246,12 @@ function validateControls(individualResults) {
 }
 
 function displayControlValidationAlerts(controlIssues) {
+    console.log('🔍 CONTAMINATION-DEBUG - displayControlValidationAlerts called with:', {
+        issueCount: controlIssues.length,
+        issues: controlIssues.slice(0, 3), // First 3 issues
+        callStack: new Error().stack.split('\n').slice(1, 4) // Show where this was called from
+    });
+    
     const alertContainer = document.getElementById('controlValidationAlerts');
     if (!alertContainer) {
         // Create alert container if it doesn't exist
@@ -7285,11 +7268,13 @@ function displayControlValidationAlerts(controlIssues) {
     if (!container) return;
     
     if (controlIssues.length === 0) {
+        console.log('🔍 CONTAMINATION-DEBUG - No control issues, hiding container');
         container.innerHTML = '';
         container.style.display = 'none';
         return;
     }
     
+    console.log('🔍 CONTAMINATION-DEBUG - Displaying', controlIssues.length, 'control issues');
     container.style.display = 'block';
     container.innerHTML = `
         <div class="control-alerts-header">
