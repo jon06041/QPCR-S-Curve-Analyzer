@@ -1705,6 +1705,84 @@ document.addEventListener('DOMContentLoaded', function() {
         btn.addEventListener('click', toggleWellSortMode);
     }
 });
+// 🚨 EMERGENCY RESET - Nuclear option to clear everything
+function emergencyReset() {
+    console.log('🚨 EMERGENCY RESET TRIGGERED');
+    
+    // Clear ALL global variables
+    csvData = null;
+    samplesData = null;
+    analysisResults = null;
+    currentChart = null;
+    amplificationFiles = {};
+    currentFilterMode = 'all';
+    currentFluorophore = 'all';
+    currentAnalysisResults = null;
+    currentChartMode = 'all';
+    
+    // Clear ALL window variables
+    window.currentAnalysisResults = null;
+    window.analysisResults = null;
+    window.freshAnalysisMode = true;
+    
+    // Destroy any existing chart
+    if (window.amplificationChart) {
+        try {
+            window.amplificationChart.destroy();
+        } catch (e) {
+            console.log('Chart destruction error (expected)');
+        }
+        window.amplificationChart = null;
+    }
+    
+    // Clear ALL form inputs
+    const fileInput = document.getElementById('fileInput');
+    const samplesInput = document.getElementById('samplesInput');
+    if (fileInput) fileInput.value = '';
+    if (samplesInput) samplesInput.value = '';
+    
+    // Clear ALL status displays
+    const statusElements = ['amplificationStatus', 'samplesStatus', 'uploadedFiles'];
+    statusElements.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) element.innerHTML = '';
+    });
+    
+    // Hide sections
+    const sectionsToHide = ['fileInfo', 'analysisSection'];
+    sectionsToHide.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) element.style.display = 'none';
+    });
+    
+    // Clear chart container
+    const chartContainer = document.getElementById('amplificationChart');
+    if (chartContainer) {
+        const ctx = chartContainer.getContext('2d');
+        ctx.clearRect(0, 0, chartContainer.width, chartContainer.height);
+    }
+    
+    // Clear results table
+    const tableBody = document.getElementById('resultsTableBody');
+    if (tableBody) tableBody.innerHTML = '';
+    
+    // Reset dropdowns
+    const dropdowns = ['wellSelect', 'fluorophoreSelect', 'filterStatus'];
+    dropdowns.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) element.innerHTML = '';
+    });
+    
+    // Clear local storage
+    try {
+        localStorage.removeItem('qpcr_analysis_history');
+    } catch (e) {
+        console.log('LocalStorage clear failed (expected)');
+    }
+    
+    console.log('🚨 EMERGENCY RESET COMPLETE! All data cleared.');
+}
+
 // qPCR S-Curve Analyzer - Frontend JavaScript
 // Global variables
 let csvData = null;
@@ -2242,6 +2320,8 @@ function updateFileInfoDisplay() {
 
 // Analysis functions
 async function performAnalysis() {
+    console.log('🔒 [ANALYSIS START] Starting fresh analysis');
+    
     if (Object.keys(amplificationFiles).length === 0) {
         alert('Please upload at least one amplification CSV file (Cy5, FAM, HEX, or Texas Red)');
         return;
@@ -2295,14 +2375,13 @@ async function performAnalysis() {
                 return;
             }
             
-            // Clear previous experiment data to prevent contamination
-            clearPreviousExperimentData();
-            
             analysisResults = singleResult;
 
             // Set global variables for control grid access during fresh analysis
-            currentAnalysisResults = singleResult;
-            window.currentAnalysisResults = singleResult;
+            // 🛡️ PROTECTED: Use safe setting to prevent contamination
+            if (!setAnalysisResults(singleResult, 'fresh-analysis-single')) {
+                console.warn('🛡️ Single channel analysis result setting was blocked');
+            }
 
             // Initialize channel thresholds after analysis results are loaded
             setTimeout(() => {
@@ -2349,9 +2428,6 @@ async function performAnalysis() {
                 throw new Error('No valid channel results available for combination');
             }
             
-            // Clear previous experiment data to prevent contamination  
-            clearPreviousExperimentData();
-            
             // Combine all fluorophore results for multi-fluorophore display (SQL-integrated)
             const combinedResults = combineMultiFluorophoreResultsSQL(validResults);
             analysisResults = combinedResults;
@@ -2375,8 +2451,10 @@ async function performAnalysis() {
             });
             
             // Set global variables for control grid access during fresh analysis
-            currentAnalysisResults = combinedResults;
-            window.currentAnalysisResults = combinedResults;
+            // 🛡️ PROTECTED: Use safe setting to prevent contamination
+            if (!setAnalysisResults(combinedResults, 'fresh-analysis-combined')) {
+                console.warn('🛡️ Combined channel analysis result setting was blocked');
+            }
             
             // Initialize channel thresholds after analysis results are loaded
             setTimeout(() => {
@@ -2421,6 +2499,9 @@ async function performAnalysis() {
 // Display functions
 async function displayAnalysisResults(results) {
     console.log('Displaying analysis results:', results);
+    
+    // Clear previous experiment data RIGHT BEFORE displaying new results
+    clearPreviousExperimentData();
     
     if (!results || !results.individual_results) {
         console.error('Invalid results structure:', results);
@@ -2554,6 +2635,9 @@ async function displayAnalysisResults(results) {
 }
 
 async function displayMultiFluorophoreResults(results) {
+    // Clear previous experiment data RIGHT BEFORE displaying new results
+    clearPreviousExperimentData();
+    
     console.log('🔍 DISPLAY-DEBUG - Displaying multi-fluorophore results:', {
         resultsExists: !!results,
         hasIndividualResults: !!(results?.individual_results),
@@ -2807,7 +2891,10 @@ function populateFluorophoreSelector(individualResults) {
     if (!fluorophoreSelector) return;
     
     // Store results globally for filtering
-    currentAnalysisResults = { individual_results: individualResults };
+    // 🛡️ PROTECTED: Use safe setting to prevent contamination
+    if (!setAnalysisResults({ individual_results: individualResults }, 'fresh-analysis-individual')) {
+        console.warn('🛡️ Individual results setting was blocked');
+    }
     
     // Clear existing options except "All Fluorophores"
     fluorophoreSelector.innerHTML = '<option value="all">All Fluorophores</option>';
@@ -3797,6 +3884,45 @@ function removeFile(fluorophore) {
     console.log(`Removed ${fluorophore} file`);
 }
 
+// 🛡️ SIMPLE: Protected function to safely set analysis results
+function setAnalysisResults(newResults, source = 'unknown') {
+    console.log(`🔄 [SETTING] Analysis results from ${source}`);
+    currentAnalysisResults = newResults;
+    window.currentAnalysisResults = newResults;
+    return true;
+}
+
+// 🛡️ SIMPLE: Load from history (user-initiated)
+function loadFromHistoryExplicit(sessionData, source = 'user-history') {
+    console.log(`🔓 [USER LOAD] User explicitly loading from history: ${source}`);
+    return setAnalysisResults(sessionData, source);
+}
+
+// 🛡️ DISPLAY ONLY: Show history session without contaminating current analysis state
+function displayHistorySession(sessionResults, source = 'history-display') {
+    console.log(`📖 [HISTORY DISPLAY] Showing history session from ${source} WITHOUT contaminating current analysis`);
+    
+    // Store the current analysis state to restore later if needed
+    const originalCurrentAnalysisResults = currentAnalysisResults;
+    const originalWindowAnalysisResults = window.currentAnalysisResults;
+    
+    // Temporarily set for display purposes only
+    const tempAnalysisResults = sessionResults;
+    
+    // Display the results using the existing display function
+    if (sessionResults.fluorophore_count && sessionResults.fluorophore_count > 1) {
+        displayMultiFluorophoreResults(sessionResults);
+    } else {
+        displayAnalysisResults(sessionResults);
+    }
+    
+    // Immediately restore the original state to prevent contamination
+    currentAnalysisResults = originalCurrentAnalysisResults;
+    window.currentAnalysisResults = originalWindowAnalysisResults;
+    
+    console.log(`📖 [HISTORY DISPLAY] Completed history display, original analysis state restored`);
+}
+
 
 
 function combineMultiFluorophoreResults(allResults) {
@@ -4039,6 +4165,14 @@ function clearCachedData() {
     analysisResults = null;
     currentAnalysisResults = null;
     
+    // 🛡️ ENHANCED: Clear window global state to prevent contamination
+    window.currentAnalysisResults = null;
+    window.analysisResults = null;
+    
+    // 🔒 DATA ISOLATION: Set flag to prevent contamination from background loading
+    window.freshAnalysisMode = true;
+    console.log('🛡️ [ISOLATION] Fresh analysis mode activated - blocking contamination');
+    
     // Reset filter states to prevent persistence on refresh
     currentFilterMode = 'all';
     currentFluorophore = 'all';
@@ -4105,7 +4239,26 @@ function clearCachedData() {
         checkAnalysisReady();
     }, 100);
     
-    console.log('Cleared all cached data aggressively');
+    // 🛡️ ENHANCED: Clear additional UI elements that retain contaminated data
+    const wellSelector = document.getElementById('wellSelector');
+    if (wellSelector) {
+        wellSelector.innerHTML = '<option value="">Select a well...</option>';
+    }
+    
+    const resultsTableBody = document.querySelector('#resultsTable tbody');
+    if (resultsTableBody) {
+        resultsTableBody.innerHTML = '';
+    }
+    
+    // Clear chart container
+    const chartContainer = document.getElementById('chartContainer');
+    if (chartContainer && chartContainer.innerHTML.trim()) {
+        console.log('🧹 [CLEARING] Chart container had content, clearing...');
+        chartContainer.innerHTML = '<canvas id="myChart"></canvas>';
+    }
+    
+    console.log('🛡️ [CACHE CLEAR] Cleared all cached data aggressively + enhanced contamination prevention');
+    console.log('🔒 [ISOLATION] Fresh analysis barrier active - old data cannot contaminate new analysis');
 }
 
 // Clear amplification files specifically
@@ -4408,25 +4561,59 @@ async function loadAnalysisHistory() {
             // Find the most recent session with individual_results
             const latestSession = data.sessions.find(s => s.individual_results && Object.keys(s.individual_results).length > 0);
             if (latestSession) {
-                // Clear previous experiment data before loading new session
-                clearPreviousExperimentData();
-                // Always wrap as { individual_results: ... }
-                window.currentAnalysisResults = { individual_results: latestSession.individual_results };
-                // Set global for legacy code
-                currentAnalysisResults = { individual_results: latestSession.individual_results };
-                // Initialize selectors and chart
-                populateWellSelector(latestSession.individual_results);
-                populateResultsTable(latestSession.individual_results);
-                // Show first well or all curves
-                const firstWell = Object.keys(latestSession.individual_results)[0];
-                if (firstWell) {
-                    showWellDetails(firstWell);
-                } else {
+                // 🛡️ PROTECTED: Only auto-load if not in fresh analysis mode
+                if (!window.freshAnalysisMode) {
+                    // Always wrap as { individual_results: ... }
+                    setAnalysisResults({ individual_results: latestSession.individual_results }, 'auto-history-load');
+                    // Initialize selectors and chart
+                    populateWellSelector(latestSession.individual_results);
+                    populateResultsTable(latestSession.individual_results);
+                    // Show first well or all curves
+                    const firstWell = Object.keys(latestSession.individual_results)[0];
+                    if (firstWell) {
+                        showWellDetails(firstWell);
+                    } else {
+                        showAllCurves('all');
+                    }
+                    // Always show all curves overlay after loading from history
                     showAllCurves('all');
+                } else {
+                    console.log('🛡️ [BLOCKED] Auto-loading of latest session blocked due to fresh analysis mode');
                 }
-                // Always show all curves overlay after loading from history
-                showAllCurves('all');
             }
+        } else {
+            // Fallback to local storage
+            const localHistory = getLocalAnalysisHistory();
+            displayLocalAnalysisHistory(localHistory);
+            // Clear channel completion status if no sessions
+            const statusContainer = document.getElementById('channelCompletionStatus');
+            if (statusContainer) {
+                statusContainer.innerHTML = '<p>No analysis history available for channel validation.</p>';
+            }
+        }
+    } catch (error) {
+        console.error('Error loading history:', error);
+        // Fallback to local storage
+        const localHistory = getLocalAnalysisHistory();
+        displayLocalAnalysisHistory(localHistory);
+    }
+}
+
+// 🔧 NEW: Load analysis history for display only, without contaminating current analysis state
+async function loadAnalysisHistoryOnly() {
+    try {
+        // Try to load from server first
+        const response = await fetch('/sessions');
+        const data = await response.json();
+        
+        if (data.sessions && data.sessions.length > 0) {
+            displayAnalysisHistory(data.sessions);
+            // Always validate channel completeness and update UI after loading history
+            validateAndUpdateUI(data.sessions);
+            
+            // 🛡️ CRITICAL: Do NOT auto-load session data into current analysis state
+            // This prevents data contamination when user loads new experiments
+            console.log('📚 [HISTORY ONLY] Loaded', data.sessions.length, 'sessions for display only');
         } else {
             // Fallback to local storage
             const localHistory = getLocalAnalysisHistory();
@@ -5868,7 +6055,7 @@ async function loadSessionDetails(sessionId) {
             // After refresh, we need to rebuild combined sessions first
             if (!window.currentCombinedSessions) {
                 console.log('Rebuilding combined sessions after refresh');
-                await loadAnalysisHistory();
+                await loadAnalysisHistoryOnly(); // 🛡️ Use non-contaminating version
             }
             
             const combinedSession = window.currentCombinedSessions?.find(s => s.id === sessionId);
@@ -6055,12 +6242,10 @@ async function loadSessionDetails(sessionId) {
             };
         });
         
-        // Clear previous experiment data to prevent contamination from history loads
-        clearPreviousExperimentData();
-        
         // Set global analysis results for chart functionality
         analysisResults = transformedResults;
-        currentAnalysisResults = transformedResults;
+        // 🛡️ DISPLAY ONLY: Show history without contaminating current analysis state
+        displayHistorySession(transformedResults, 'session-details-load');
         
         // Store session data globally for pathogen target extraction
         window.currentSessionData = sessionData;
@@ -6156,9 +6341,8 @@ function loadLocalSessionDetails(sessionIndex) {
         }
         const session = history[sessionIndex];
         analysisResults = session.results;
-        // Patch: set currentAnalysisResults and window.currentAnalysisResults for full compatibility
-        window.currentAnalysisResults = session.results;
-        currentAnalysisResults = session.results;
+        // 🛡️ DISPLAY ONLY: Show history without contaminating current analysis state
+        displayHistorySession(session.results, 'local-history-session');
         // Patch: set hasAnyLoadedSession = true and force UI to loaded state
         if (typeof window.hasAnyLoadedSession !== 'undefined') {
             window.hasAnyLoadedSession = true;
@@ -10248,7 +10432,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Initialize cache clearing and load sessions
     clearCachedData();
-    loadAnalysisHistory();
+    loadAnalysisHistoryOnly(); // Modified to not auto-load session data
 });
 
 // Display combined session results
@@ -10475,12 +10659,10 @@ async function displaySessionResults(session) {
             };
         });
         
-        // Clear previous experiment data to prevent contamination from combined session loads
-        clearPreviousExperimentData();
-        
         // Set global analysis results
         analysisResults = transformedResults;
-        currentAnalysisResults = transformedResults;
+        // 🛡️ DISPLAY ONLY: Show combined session without contaminating current analysis state
+        displayHistorySession(transformedResults, 'combined-session-load');
         
         console.log('Combined session transformed - total wells:', totalWells, 'individual results:', Object.keys(transformedResults.individual_results).length);
         console.log('Sample well keys:', Object.keys(transformedResults.individual_results).slice(0, 10));

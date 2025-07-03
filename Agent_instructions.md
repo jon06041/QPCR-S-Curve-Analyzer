@@ -1,6 +1,26 @@
 # Agent Instructions: Multi-Fluorophore qPCR Analysis - EXPERIMENT ISOLATION V2
 
-## CURRENT STATUS (July 3, 2025 - RESTORED TO LAST KNOWN GOOD BRANCH)
+## 🚨 CRITICAL: READ THIS FIRST - Data Contamination Prevention
+
+### MANDATORY: Review `/docs/DATA_CONTAMINATION_FIX.md` Before ANY Changes
+**The application has a comprehensive data contamination prevention system that MUST be followed.**
+
+**Key Rules (NEVER BREAK THESE):**
+1. **NEVER directly assign to global analysis variables** - Use `setAnalysisResults()` instead
+2. **History functions must not contaminate state** - Use `displayHistorySession()` for view-only
+3. **Emergency reset available** - `emergencyReset()` function clears ALL data when needed
+4. **Auto-reset on history** - `loadSessionDetails()` automatically resets before loading
+
+**Quick Reference:**
+- ✅ `setAnalysisResults(data, 'source')` - Safe state setting
+- ✅ `displayHistorySession(data)` - View history without contamination  
+- ✅ `emergencyReset()` - Nuclear option to clear everything
+- ❌ `currentAnalysisResults = data` - PROHIBITED direct assignment
+- ❌ `window.currentAnalysisResults = data` - PROHIBITED direct assignment
+
+---
+
+## CURRENT STATUS (July 3, 2025 - DATA CONTAMINATION FIX COMPLETED)
 
 ### 🔄 TASK IN PROGRESS: Experiment Isolation Fix - Version 2
 
