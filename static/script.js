@@ -1754,8 +1754,11 @@ function clearPreviousExperimentData() {
     }
     
     // 5. Clear Chart
-    if (window.amplificationChart) {
+    if (window.amplificationChart && typeof window.amplificationChart.destroy === 'function') {
         window.amplificationChart.destroy();
+        window.amplificationChart = null;
+    } else if (window.amplificationChart) {
+        // If destroy method doesn't exist, just clear the reference
         window.amplificationChart = null;
     }
     
@@ -2302,9 +2305,6 @@ async function performAnalysis() {
             }
             analysisResults = singleResult;
 
-            // Clear previous experiment data to prevent contamination
-            clearPreviousExperimentData();
-
             // Set global variables for control grid access during fresh analysis
             currentAnalysisResults = singleResult;
             window.currentAnalysisResults = singleResult;
@@ -2375,9 +2375,6 @@ async function performAnalysis() {
                     return breakdown;
                 })()
             });
-            
-            // Clear previous experiment data to prevent contamination
-            clearPreviousExperimentData();
             
             // Set global variables for control grid access during fresh analysis
             currentAnalysisResults = combinedResults;
@@ -4415,9 +4412,6 @@ async function loadAnalysisHistory() {
             // Find the most recent session with individual_results
             const latestSession = data.sessions.find(s => s.individual_results && Object.keys(s.individual_results).length > 0);
             if (latestSession) {
-                // Clear previous experiment data to prevent contamination
-                clearPreviousExperimentData();
-                
                 // Always wrap as { individual_results: ... }
                 window.currentAnalysisResults = { individual_results: latestSession.individual_results };
                 // Set global for legacy code
@@ -6062,9 +6056,6 @@ async function loadSessionDetails(sessionId) {
                 }
             };
         });
-        
-        // Clear previous experiment data to prevent contamination
-        clearPreviousExperimentData();
         
         // Set global analysis results for chart functionality
         analysisResults = transformedResults;
@@ -10474,9 +10465,6 @@ async function displaySessionResults(session) {
                 })()
             };
         });
-        
-        // Clear previous experiment data to prevent contamination
-        clearPreviousExperimentData();
         
         // Set global analysis results
         analysisResults = transformedResults;
