@@ -1717,6 +1717,123 @@ let currentFluorophore = 'all'; // Track current fluorophore filter
 let currentAnalysisResults = null; // Current analysis results
 let currentChartMode = 'all'; // Track current chart display mode
 
+// =============================================================================
+// EXPERIMENT ISOLATION SYSTEM - Centralized cleanup for cross-contamination prevention
+// =============================================================================
+
+/**
+ * Clears all previous experiment data from UI components and global state
+ * This prevents cross-contamination when switching between experiments
+ */
+function clearPreviousExperimentData() {
+    console.log('🧹 Clearing previous experiment data to prevent contamination...');
+    
+    // 1. Clear Global State
+    currentAnalysisResults = null;
+    window.currentAnalysisResults = null;
+    currentFilterMode = 'all';
+    currentFluorophore = 'all';
+    currentChartMode = 'all';
+    
+    // 2. Clear Results Table
+    const resultsTableBody = document.querySelector('#resultsTable tbody');
+    if (resultsTableBody) {
+        resultsTableBody.innerHTML = '';
+    }
+    
+    // 3. Clear Well Selector Dropdown
+    const wellSelector = document.getElementById('wellSelector');
+    if (wellSelector) {
+        wellSelector.innerHTML = '<option value="">Select a well...</option>';
+    }
+    
+    // 4. Clear Fluorophore Selector
+    const fluorophoreSelector = document.getElementById('fluorophoreSelector');
+    if (fluorophoreSelector) {
+        fluorophoreSelector.innerHTML = '<option value="all">All Fluorophores</option>';
+    }
+    
+    // 5. Clear Chart
+    if (window.amplificationChart) {
+        window.amplificationChart.destroy();
+        window.amplificationChart = null;
+    }
+    
+    // 6. Clear Modal State
+    const modal = document.getElementById('chartModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    
+    // 7. Clear Control Grids
+    const controlGridsContainer = document.getElementById('pathogenControlGrids');
+    if (controlGridsContainer) {
+        controlGridsContainer.innerHTML = '';
+        controlGridsContainer.style.display = 'none';
+    }
+    
+    // 8. Clear Analysis Summary
+    clearAnalysisSummary();
+    
+    // 9. Clear Selected Curve Details
+    const curveDetailsContainer = document.querySelector('.curve-details-content');
+    if (curveDetailsContainer) {
+        curveDetailsContainer.innerHTML = '<p>No curve selected. Click on a row in the results table to view details.</p>';
+    }
+    
+    // 10. Reset Filter Buttons
+    resetFilterButtons();
+    
+    console.log('✅ Previous experiment data cleared successfully');
+}
+
+/**
+ * Clears the analysis summary section
+ */
+function clearAnalysisSummary() {
+    const summaryElements = [
+        'experimentName',
+        'totalWells', 
+        'positiveWells',
+        'positiveRate',
+        'cycleRange'
+    ];
+    
+    summaryElements.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = '--';
+        }
+    });
+    
+    // Clear pathogen breakdown
+    const pathogenBreakdown = document.getElementById('pathogenBreakdown');
+    if (pathogenBreakdown) {
+        pathogenBreakdown.innerHTML = '';
+    }
+}
+
+/**
+ * Reset filter buttons to default state
+ */
+function resetFilterButtons() {
+    const buttons = ['showAllBtn', 'showPosBtn', 'showNegBtn', 'showRedoBtn'];
+    buttons.forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) {
+            btn.classList.remove('active');
+        }
+    });
+    
+    // Set "Show All Wells" as active by default
+    const showAllBtn = document.getElementById('showAllBtn');
+    if (showAllBtn) {
+        showAllBtn.classList.add('active');
+    }
+}
+
+// =============================================================================
+
 // Production-specific error handling
 window.addEventListener('error', function(event) {
     console.error('Global error caught:', event.error);
@@ -2185,6 +2302,9 @@ async function performAnalysis() {
             }
             analysisResults = singleResult;
 
+            // Clear previous experiment data to prevent contamination
+            clearPreviousExperimentData();
+
             // Set global variables for control grid access during fresh analysis
             currentAnalysisResults = singleResult;
             window.currentAnalysisResults = singleResult;
@@ -2255,6 +2375,9 @@ async function performAnalysis() {
                     return breakdown;
                 })()
             });
+            
+            // Clear previous experiment data to prevent contamination
+            clearPreviousExperimentData();
             
             // Set global variables for control grid access during fresh analysis
             currentAnalysisResults = combinedResults;
@@ -4292,6 +4415,9 @@ async function loadAnalysisHistory() {
             // Find the most recent session with individual_results
             const latestSession = data.sessions.find(s => s.individual_results && Object.keys(s.individual_results).length > 0);
             if (latestSession) {
+                // Clear previous experiment data to prevent contamination
+                clearPreviousExperimentData();
+                
                 // Always wrap as { individual_results: ... }
                 window.currentAnalysisResults = { individual_results: latestSession.individual_results };
                 // Set global for legacy code
@@ -5936,6 +6062,9 @@ async function loadSessionDetails(sessionId) {
                 }
             };
         });
+        
+        // Clear previous experiment data to prevent contamination
+        clearPreviousExperimentData();
         
         // Set global analysis results for chart functionality
         analysisResults = transformedResults;
@@ -10345,6 +10474,9 @@ async function displaySessionResults(session) {
                 })()
             };
         });
+        
+        // Clear previous experiment data to prevent contamination
+        clearPreviousExperimentData();
         
         // Set global analysis results
         analysisResults = transformedResults;

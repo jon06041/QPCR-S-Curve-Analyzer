@@ -1,128 +1,145 @@
-# Agent Instructions: Multi-Fluorophore qPCR Analysis - CONTROL GRID CLEANUP COMPLETE ✅
+# Agent Instructions: Multi-Fluorophore qPCR Analysis - EXPERIMENT ISOLATION V2
 
-## FINAL STATUS (July 2, 2025 - CONTROL GRID CLEANUP SUCCESSFULLY COMPLETED)
+## CURRENT STATUS (July 3, 2025 - RESTORED TO LAST KNOWN GOOD BRANCH)
 
-### ✅ TASK COMPLETE: Control Grid Display Fixed
+### 🔄 TASK IN PROGRESS: Experiment Isolation Fix - Version 2
 
-**Objective**: ✅ COMPLETED - Systematically clean up duplicate control grid code and ensure proper table display
-**Method**: ✅ COMPLETED - Comment out duplicate functions, add minimal CSS, test and document each step
-**Branches**: ✅ ALL MERGED - `fix/control-grid-cleanup` → `fix/css-styling` → `main` → pushed to remote
+**Objective**: Implement robust experiment isolation to prevent cross-contamination between experiments
+**Method**: Incremental, test-driven approach with proper branching and rollback capability
+**Current Branch**: `fix/experiment-isolation-v2` (created from `fix-threshold-pathogen-tabs`)
 
-#### ✅ FINAL WORKING SOLUTION:
-- **Problem**: Multiple duplicate control grid functions causing display conflicts
-- **Solution**: Commented out 2 duplicate functions, restored 1 main function, added minimal CSS
-- **Result**: Control grids now display as proper 5×5 tables with CSS Grid layout
-- **Status**: WORKING and TESTED
+#### 🎯 RESTORATION COMPLETED:
+- **Restored from**: `fix-threshold-pathogen-tabs` (last known working state)
+- **New branch**: `fix/experiment-isolation-v2` 
+- **Database**: Fixed (28KB, proper permissions) - was 0 bytes in broken state
+- **JavaScript**: No syntax errors detected
+- **Previous work**: Safely stashed on `fix/experiment-isolation` branch
 
-#### ✅ SUCCESSFUL CHANGES APPLIED:
+#### 📋 EXPERIMENT ISOLATION REQUIREMENTS:
 
-**1. Duplicate Function Cleanup (static/script.js):**
-- ✅ `createIndividualPathogenGrid` (lines ~10691-10800) - COMMENTED OUT
-- ✅ `createIndividualPathogenGridDOM` (lines ~10806-11056) - COMMENTED OUT  
-- ✅ `createPathogenSpecificGrids` (lines ~7788-7861) - RESTORED (uncommented, this populates grids)
+**1. UI Component Isolation:**
+- Results table shows only wells/channels for current experiment
+- Chart displays only current experiment data
+- Dropdown menus (well selection) contain only current experiment options
+- Modals (well details, thresholds) operate only on current experiment data
+- Control grids display only current experiment wells
 
-**2. Minimal CSS Fix (static/style.css):**
-- ✅ Added 20 lines of CSS for `.control-grid-layout` at end of file
-- ✅ CSS Grid layout: `display: grid; grid-template-columns: repeat(5, 1fr)`
-- ✅ Proper table styling with borders, padding, and alignment
-- ✅ NO BREAKING CHANGES - existing styles preserved
+**2. Cross-Experiment Contamination Prevention:**
+- Loading a new experiment clears all UI components completely
+- No data from previous experiments appears in any UI element
+- Session storage maintains separation between experiment data
+- Backend processing isolates experiments properly
 
-**3. Documentation & Git Management:**
-- ✅ Every step documented in Agent_instructions.md with results
-- ✅ All working changes committed with descriptive messages
-- ✅ Safe revert performed when CSS changes broke the app
-- ✅ All branches merged: `fix/control-grid-cleanup` → `fix/css-styling` → `main`
-- ✅ All branches pushed to remote repository
+**3. Multi-Channel vs Single-Channel Isolation:**
+- Multi-channel experiments show all required channels (e.g., FAM, HEX, ROX, Cy5)
+- Single-channel experiments show only the relevant channel
+- Switching between experiment types properly updates all UI components
 
-### 🎯 CURRENT STATE FOR NEXT AGENT:
+#### 🛡️ LESSONS LEARNED FROM PREVIOUS ATTEMPT:
 
-**✅ WORKING SOLUTION**: Control grids display as proper 5×5 tables
-**⚠️ TABS NEED FIX**: Control grid tabs not functioning properly - needs immediate attention
-**✅ CLEAN CODEBASE**: Duplicate/legacy code commented out, active code preserved
-**✅ SAFE & TESTED**: Methodical approach with rollback capability maintained
-**✅ FULLY DOCUMENTED**: Complete step-by-step process documented
+**❌ FAILED APPROACH - Centralized Filtering:**
+- Implemented `applyExperimentIsolationFilter()` and `setFilteredAnalysisResults()`
+- Applied filtering to all `currentAnalysisResults` assignments
+- **Result**: Too aggressive - filtered out valid data, broke chart/UI completely
+- **Error**: `window.amplificationChart is undefined` - chart never initialized
 
-**GIT STATE**:
-- Main branch: `b873a4e` - "SUCCESS: Minimal CSS fix - control grids now display as proper tables"
-- All three branches at same commit and pushed to remote
-- Working tree clean, all changes committed
-- **Active**: `createPathogenControlGrids` (main entry point) + `updateControlGridWithRealCoordinates`
-- **Removed**: All duplicate competing grid creation systems
+**❌ ROLLBACK ISSUES:**
+- Simple revert didn't restore functionality
+- Database became readonly/empty (0 bytes)
+- Application remained broken even after code restoration
 
-### 🎯 NEXT PRIORITY FOR NEXT AGENT:
+**✅ WORKING RESTORATION:**
+- Full branch restoration to `fix-threshold-pathogen-tabs`
+- Database restored to working state (28KB)
+- Clean JavaScript with no errors
+- Ready for incremental approach
 
-#### 🔧 IMMEDIATE TASK: Fix Control Grid Tabs
-**Problem**: Control grids display correctly but tabs are not functioning properly
-**Priority**: HIGH - Required for multi-channel pathogen navigation
-**Expected Behavior**: 
-- Each pathogen/fluorophore should have its own tab
-- Clicking tabs should switch between different pathogen control grids
-- Tab navigation should work smoothly
-- Active tab should be clearly indicated
+#### 📋 NEW APPROACH - INCREMENTAL & TEST-DRIVEN:
 
-**Files to Check**:
-- `static/script.js` - Tab switching functionality in `createPathogenSpecificGrids`
-- `static/style.css` - Tab styling (`.tab-button`, `.tab-panel`, `.active` classes)
-- Console errors related to tab functionality
+**Phase 1: Investigation & Understanding**
+1. ✅ Restore to known good branch (`fix-threshold-pathogen-tabs`)
+2. ✅ Create new branch (`fix/experiment-isolation-v2`)
+3. 🔄 Analyze current data flow and UI update patterns
+4. 🔄 Identify specific contamination points
+5. 🔄 Create test scenarios for validation
 
-#### 🔧 SECONDARY TASKS:
-1. **Fix Database Issue**: `sqlite3.IntegrityError: FOREIGN KEY constraint failed`
-2. **Threshold Display System**: Chart.js annotation lines not appearing
-3. **CFX Manager Baseline Flattening**: New feature request for linear scale noise reduction
-```javascript
-// Expected behavior: Control grids should display in proper format:
-// | Control | Set 1 | Set 2 | Set 3 | Set 4 |
-// |---------|-------|-------|-------|-------|
-// |    H    |  H1   |  H2   |  H3   |  H4   |
-// |    M    |  M1   |  M2   |  M3   |  M4   |
-// |    L    |  L1   |  L2   |  L3   |  L4   |
-// |   NTC   | NTC1  | NTC2  | NTC3  | NTC4  |
-```
+**Phase 2: Targeted Fixes**
+1. Implement minimal, surgical changes to specific UI components
+2. Test each change individually before proceeding
+3. Focus on data source filtering rather than universal filtering
+4. Maintain chart initialization and UI functionality
 
-### 🔧 IDENTIFIED DUPLICATE CODE STRUCTURE:
+**Phase 3: Validation & Documentation**
+1. Test all experiment switching scenarios
+2. Verify no cross-contamination in any UI component
+3. Document final solution and test protocols
+4. Commit and merge when fully validated
 
-#### Control Grid Creation Functions (5 Total):
-1. **`createPathogenSpecificGrids`** (line ~7788) - 🎯 **NEXT TEST TARGET**
-   - Creates tabbed grids with manual DOM creation
-   - Large function (~100+ lines)
-   - May be main source of styling conflicts
+#### 🔧 CRITICAL PROTOCOLS:
 
-2. **`createPathogenGrid`** (line ~7865) - Called by #1
-3. **`createIndividualPathogenGrid`** (line ~10691) - ✅ **COMMENTED OUT**
-4. **`createIndividualPathogenGridDOM`** (line ~10803) - ✅ **COMMENTED OUT** 
-5. **`createPathogenControlGrids`** (line ~11061) - Main entry point
+**ALWAYS BEFORE CHANGES:**
+1. Create a new branch from last known good state
+2. Document expected changes and test criteria
+3. Test current functionality to establish baseline
 
-#### CSS Sections:
-- **Kept**: Lines 2909+ (proper CSS Grid layout)
-- **Removed**: Duplicate sections (as documented in previous fixes)
+**DURING IMPLEMENTATION:**
+1. Make one small change at a time
+2. Test immediately after each change
+3. Commit working states, stash broken states
+4. Never implement universal/global changes without targeted testing
 
-### 💾 GIT STATE:
-```
-Branch: fix/control-grid-cleanup
-Recent Commits:
-- 0883d50: TEST 3 Comment out createPathogenSpecificGrids (MAJOR)
-- 6b5bb6e: TEST 2 Comment out createIndividualPathogenGridDOM 
-- 77c75ec: TEST 1 Comment out createIndividualPathogenGrid
-- 1655040: Backup state before cleanup
+**TESTING PROTOCOL:**
+1. Upload a multi-channel experiment → verify all channels appear
+2. Upload a single-channel experiment → verify only relevant channel appears  
+3. Load previous multi-channel from history → verify no single-channel contamination
+4. Load previous single-channel from history → verify no multi-channel contamination
+5. Verify chart, table, dropdowns, modals, and control grids all work correctly
 
-Parent Branch: fix/css-styling (contains all Phase 2 work)
-```
+#### 📁 KEY FILES TO ANALYZE:
 
-### 📱 COMPUTER HANDOFF NOTES:
-- **Server**: `python3 app.py` (port 5002) - may have database issues
-- **Testing**: Upload qPCR CSV file, check control grid display format
-- **Method**: Systematic comment/test/document approach
-- **Goal**: Remove duplicate code causing grid styling conflicts
+**Frontend (JavaScript):**
+- `/static/script.js` - Main data flow, UI updates, filtering logic
+- `/static/pathogen_library.js` - Defines required channels per experiment type
+
+**Backend (Python):**
+- `/app.py` - Session handling, experiment loading
+- `/models.py` - Database schema, data structure
+- `/sql_integration.py` - Database operations
+
+**UI (HTML/CSS):**
+- `/index.html` - UI structure, component definitions
+- `/static/style.css` - Styling that affects component visibility
+
+#### 🚨 ERROR MONITORING:
+
+**Watch for these critical errors:**
+- `window.amplificationChart is undefined` - indicates chart initialization failure
+- `sqlite3.OperationalError: attempt to write a readonly database` - database permission issue
+- Empty/missing dropdowns - indicates data filtering too aggressive
+- Broken modals - indicates event handlers or data access issues
+
+### 🎯 NEXT STEPS:
+
+1. **Analyze Current Data Flow** - Trace how experiment data flows through the application
+2. **Identify Contamination Points** - Find where previous experiment data persists
+3. **Design Surgical Fixes** - Target specific UI update functions rather than global filtering
+4. **Implement & Test Incrementally** - One component at a time with immediate validation
+5. **Document & Commit Working Solution** - Full testing protocol and clean commit history
+
+**Current Branch**: `fix/experiment-isolation-v2`  
+**Database Status**: ✅ Working (28KB, proper permissions)  
+**Application Status**: ✅ Functional (no JavaScript errors)  
+**Ready for**: Incremental experiment isolation implementation
 
 ---
 
-*Last updated: July 2, 2025 - Phase 2 Complete*
-*Next Phase: Chart.js Optimization & User Experience Enhancement*
+*Last updated: July 3, 2025 - Phase 1 Analysis Complete, Phase 2 Implementation Started*
+*Current Phase: Experiment Isolation Implementation*
 
 ## Overview
 This document provides comprehensive instructions and findings from debugging and improving the multi-fluorophore (multi-channel) qPCR analysis workflow. The main goal was to ensure all channels (Cy5, FAM, HEX, Texas Red) are processed, combined, and displayed correctly.
 
-## CURRENT STATUS (July 1, 2025 - Session End)
+## CURRENT STATUS (July 3, 2025 - Session End)
 ✅ **Multi-fluorophore processing**: COMPLETED - Sequential processing, error handling, threshold preservation
 ✅ **Control Grid CSS**: COMPLETED - Fixed both duplicate CSS and grid layout structure
 ✅ **Tabbed Grid Layout**: COMPLETED - Grid layout within tabs now works correctly
@@ -534,7 +551,7 @@ From analysis, the JavaScript expects these CSS classes:
 - ✅ All HTML/CSS/JS changes committed and pushed
 - 🔄 **NEXT**: Address multi-view consistency (Show All Wells, POS, NEG, REDO) and per-channel threshold management
 
-## CURRENT SESSION PROGRESS (July 1, 2025 - Final Documentation)
+## CURRENT SESSION PROGRESS (July 3, 2025 - Final Documentation)
 
 ### 🚨 IMMEDIATE ISSUE: JavaScript Syntax Error + Threshold System
 **Problem 1**: Script.js has unclosed brace causing syntax error (line ~1604)
