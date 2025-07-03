@@ -1780,21 +1780,7 @@ function emergencyReset() {
         console.log('LocalStorage clear failed (expected)');
     }
     
-    // Clear ALL threshold storage - FIX FOR THRESHOLD CONTAMINATION
-    window.stableChannelThresholds = {};
-    window.channelControlWells = {};
-    channelThresholds = {};
-    currentScaleMode = 'linear';
-    currentScaleMultiplier = 1.0;
-    
-    // Clear threshold sessionStorage
-    try {
-        sessionStorage.removeItem('stableChannelThresholds');
-    } catch (e) {
-        console.log('Threshold sessionStorage clear failed');
-    }
-    
-    console.log('🚨 EMERGENCY RESET COMPLETE! All data cleared including thresholds.');
+    console.log('🚨 EMERGENCY RESET COMPLETE! All data cleared.');
 }
 
 // qPCR S-Curve Analyzer - Frontend JavaScript
