@@ -1728,9 +1728,8 @@ let currentChartMode = 'all'; // Track current chart display mode
 function clearPreviousExperimentData() {
     console.log('🧹 Clearing previous experiment data to prevent contamination...');
     
-    // 1. Clear Global State
-    currentAnalysisResults = null;
-    window.currentAnalysisResults = null;
+    // 1. Clear Global State (but don't reset to null if we're about to set new data)
+    // Reset filter states
     currentFilterMode = 'all';
     currentFluorophore = 'all';
     currentChartMode = 'all';
@@ -2303,6 +2302,10 @@ async function performAnalysis() {
                 if (loadingIndicator) loadingIndicator.style.display = 'none';
                 return;
             }
+            
+            // Clear previous experiment data to prevent contamination
+            clearPreviousExperimentData();
+            
             analysisResults = singleResult;
 
             // Set global variables for control grid access during fresh analysis
@@ -2353,6 +2356,9 @@ async function performAnalysis() {
             if (Object.keys(validResults).length === 0) {
                 throw new Error('No valid channel results available for combination');
             }
+            
+            // Clear previous experiment data to prevent contamination  
+            clearPreviousExperimentData();
             
             // Combine all fluorophore results for multi-fluorophore display (SQL-integrated)
             const combinedResults = combineMultiFluorophoreResultsSQL(validResults);
@@ -4412,6 +4418,8 @@ async function loadAnalysisHistory() {
             // Find the most recent session with individual_results
             const latestSession = data.sessions.find(s => s.individual_results && Object.keys(s.individual_results).length > 0);
             if (latestSession) {
+                // Clear previous experiment data before loading new session
+                clearPreviousExperimentData();
                 // Always wrap as { individual_results: ... }
                 window.currentAnalysisResults = { individual_results: latestSession.individual_results };
                 // Set global for legacy code
