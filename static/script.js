@@ -1777,7 +1777,21 @@ function clearPreviousExperimentData() {
     // 8. Clear Analysis Summary
     clearAnalysisSummary();
     
-    // 9. Clear Selected Curve Details
+    // 9. Clear Control Validation Alerts (prevent contamination from previous experiments)
+    const controlValidationContainer = document.getElementById('controlValidationAlerts');
+    if (controlValidationContainer) {
+        controlValidationContainer.innerHTML = '';
+        controlValidationContainer.style.display = 'none';
+    }
+    
+    // 10. Clear Channel Processing Status (prevent contamination from previous multi-channel processing)
+    const channelStatusContainer = document.getElementById('channel-processing-status');
+    if (channelStatusContainer) {
+        channelStatusContainer.innerHTML = '';
+        channelStatusContainer.style.display = 'none';
+    }
+    
+    // 11. Clear Selected Curve Details
     const curveDetailsContainer = document.querySelector('.curve-details-content');
     if (curveDetailsContainer) {
         curveDetailsContainer.innerHTML = '<p>No curve selected. Click on a row in the results table to view details.</p>';
@@ -1795,6 +1809,7 @@ function clearPreviousExperimentData() {
 function clearAnalysisSummary() {
     const summaryElements = [
         'experimentName',
+        'experimentPattern', // Clear experiment pattern to prevent contamination
         'totalWells', 
         'positiveWells',
         'positiveRate',
