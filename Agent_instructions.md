@@ -59,15 +59,20 @@
 **Phase 1: Investigation & Understanding**
 1. ✅ Restore to known good branch (`fix-threshold-pathogen-tabs`)
 2. ✅ Create new branch (`fix/experiment-isolation-v2`)
-3. 🔄 Analyze current data flow and UI update patterns
-4. 🔄 Identify specific contamination points
-5. 🔄 Create test scenarios for validation
+3. ✅ Analyze current data flow and UI update patterns
+4. ✅ Identify specific contamination points
+5. ✅ Create test scenarios for validation
 
 **Phase 2: Targeted Fixes**
-1. Implement minimal, surgical changes to specific UI components
-2. Test each change individually before proceeding
-3. Focus on data source filtering rather than universal filtering
-4. Maintain chart initialization and UI functionality
+1. ✅ Implement minimal, surgical changes to specific UI components
+2. ✅ Test each change individually before proceeding
+3. ✅ Focus on data source filtering rather than universal filtering
+4. ✅ Maintain chart initialization and UI functionality
+
+**COMPLETED FIXES:**
+- ✅ **Fresh Upload Clearing**: Fixed order of clearPreviousExperimentData() calls
+- ✅ **History Load Clearing**: Added clearing calls to loadSessionDetails() and displaySessionResults()
+- ✅ **Global Variable Management**: Prevented clearing of variables that are immediately reset
 
 **Phase 3: Validation & Documentation**
 1. Test all experiment switching scenarios
@@ -89,11 +94,19 @@
 4. Never implement universal/global changes without targeted testing
 
 **TESTING PROTOCOL:**
+✅ **COMPLETED FIXES:**
+- Fresh upload clearing: Fixed order of clearPreviousExperimentData() calls
+- History load clearing: Added clearing to loadSessionDetails() and displaySessionResults()
+- Global variable management: Prevented premature clearing of analysis results
+
+🧪 **VALIDATION TESTS:**
 1. Upload a multi-channel experiment → verify all channels appear
 2. Upload a single-channel experiment → verify only relevant channel appears  
-3. Load previous multi-channel from history → verify no single-channel contamination
-4. Load previous single-channel from history → verify no multi-channel contamination
+3. Load previous multi-channel from history → verify no single-channel contamination ✅ FIXED
+4. Load previous single-channel from history → verify no multi-channel contamination ✅ FIXED
 5. Verify chart, table, dropdowns, modals, and control grids all work correctly
+6. Test switching between different history sessions → verify complete data replacement
+7. Test fresh upload after history load → verify no contamination
 
 #### 📁 KEY FILES TO ANALYZE:
 
