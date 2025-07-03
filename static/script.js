@@ -6065,6 +6065,9 @@ async function loadSessionDetails(sessionId) {
             };
         });
         
+        // Clear previous experiment data to prevent contamination from history loads
+        clearPreviousExperimentData();
+        
         // Set global analysis results for chart functionality
         analysisResults = transformedResults;
         currentAnalysisResults = transformedResults;
@@ -10473,6 +10476,9 @@ async function displaySessionResults(session) {
                 })()
             };
         });
+        
+        // Clear previous experiment data to prevent contamination from combined session loads
+        clearPreviousExperimentData();
         
         // Set global analysis results
         analysisResults = transformedResults;
