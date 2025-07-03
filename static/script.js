@@ -1780,7 +1780,21 @@ function emergencyReset() {
         console.log('LocalStorage clear failed (expected)');
     }
     
-    console.log('🚨 EMERGENCY RESET COMPLETE! All data cleared.');
+    // Clear ALL threshold storage - FIX FOR THRESHOLD CONTAMINATION
+    window.stableChannelThresholds = {};
+    window.channelControlWells = {};
+    channelThresholds = {};
+    currentScaleMode = 'linear';
+    currentScaleMultiplier = 1.0;
+    
+    // Clear threshold sessionStorage
+    try {
+        sessionStorage.removeItem('stableChannelThresholds');
+    } catch (e) {
+        console.log('Threshold sessionStorage clear failed');
+    }
+    
+    console.log('🚨 EMERGENCY RESET COMPLETE! All data cleared including thresholds.');
 }
 
 // qPCR S-Curve Analyzer - Frontend JavaScript
@@ -3906,8 +3920,14 @@ function displayHistorySession(sessionResults, source = 'history-display') {
     const originalCurrentAnalysisResults = currentAnalysisResults;
     const originalWindowAnalysisResults = window.currentAnalysisResults;
     
-    // Temporarily set for display purposes only
-    const tempAnalysisResults = sessionResults;
+    // Temporarily set for display and threshold calculation
+    currentAnalysisResults = sessionResults;
+    
+    // 🆕 THRESHOLD FIX: Recalculate thresholds for historical data
+    console.log(`📖 [HISTORY DISPLAY] Recalculating thresholds for historical data`);
+    if (sessionResults && sessionResults.individual_results) {
+        initializeChannelThresholds();
+    }
     
     // Display the results using the existing display function
     if (sessionResults.fluorophore_count && sessionResults.fluorophore_count > 1) {
@@ -3920,7 +3940,7 @@ function displayHistorySession(sessionResults, source = 'history-display') {
     currentAnalysisResults = originalCurrentAnalysisResults;
     window.currentAnalysisResults = originalWindowAnalysisResults;
     
-    console.log(`📖 [HISTORY DISPLAY] Completed history display, original analysis state restored`);
+    console.log(`📖 [HISTORY DISPLAY] Completed history display with proper thresholds, original analysis state restored`);
 }
 
 
