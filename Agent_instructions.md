@@ -1,10 +1,10 @@
 # Agent Instructions: Multi-Fluorophore qPCR Analysis - DATA CONTAMINATION FIXED
 
-## 🚨 CRITICAL: READ THIS FIRST - Data Contamination Prevention (COMPLETED 2025-01-03)
+## 🚨 CRITICAL: READ THIS FIRST - Data Contamination Prevention (COMPLETED 2025-07-03)
 
 ### ✅ DATA CONTAMINATION FIX IMPLEMENTED AND MERGED TO MAIN
 
-**COMPLETED ON**: January 3, 2025
+**COMPLETED ON**: July 3, 2025
 **STATUS**: MERGED TO MAIN BRANCH  
 **ISSUE**: Data contamination between experiments and history sessions
 **SOLUTION**: Comprehensive prevention system with emergency reset and isolation
@@ -50,7 +50,7 @@ window.currentAnalysisResults = data // FORBIDDEN
 
 ---
 
-## CURRENT STATUS (January 3, 2025 - NEW BRANCH FOR THRESHOLD INTEGRITY)
+## CURRENT STATUS (July 3, 2025 - NEW BRANCH FOR THRESHOLD INTEGRITY)
 
 ### 🔄 NEXT TASK: Threshold Integrity and Statistics Fix
 
@@ -120,7 +120,7 @@ window.currentAnalysisResults = data // FORBIDDEN
 
 #### � DATA CONTAMINATION FIX DETAILS (REFERENCE):
 
-**COMPLETED CHANGES (2025-01-03):**
+**COMPLETED CHANGES (2025-07-03):**
 - Added `emergencyReset()` function with manual button
 - Implemented `displayHistorySession()` for non-contaminating history viewing
 - Modified `loadSessionDetails()` to auto-reset before loading
@@ -195,11 +195,38 @@ window.currentAnalysisResults = data // FORBIDDEN
 - Document all changes in commit messages with date stamps
 
 **CURRENT ACTIVE BRANCH**: `fix/threshold-integrity-stats`
-**LAST MAJOR FIX**: Data contamination prevention (2025-01-03) - COMPLETED
+**LAST MAJOR FIX**: Data contamination prevention (2025-07-03) - COMPLETED
 
 ---
 
-*Last updated: January 3, 2025 - Data Contamination Fix Completed & Merged*
+## 📁 DOCUMENTATION POLICY (July 3, 2025)
+
+**CONSOLIDATED DOCUMENTATION APPROACH:**
+- ✅ **PRIMARY DOCUMENTATION**: `Agent_instructions.md` (this file) - ALL agents must read and update this
+- ✅ **ARCHIVE LOCATION**: `/docs/` folder - Contains historical documentation for reference only
+- ✅ **NO NEW STANDALONE DOCS**: All new findings, fixes, and instructions go in this file
+- ✅ **VERSION CONTROL**: All important changes tracked with dates in this file
+
+**MOVED TO `/docs/` ARCHIVE:**
+- `CURRENT_STATUS.md` → `docs/CURRENT_STATUS.md`
+- `DEPLOYMENT_GUIDE.md` → `docs/DEPLOYMENT_GUIDE.md` 
+- `FINAL_STATUS.md` → `docs/FINAL_STATUS.md`
+- `IMPLEMENTATION_SUMMARY.md` → `docs/IMPLEMENTATION_SUMMARY.md`
+- `MULTICHANNEL_PROCESSING_ISSUE.md` → `docs/MULTICHANNEL_PROCESSING_ISSUE.md`
+- `QUICK_FIX_GUIDE.md` → `docs/QUICK_FIX_GUIDE.md`
+- `RAILWAY_DEPLOYMENT_GUIDE.md` → `docs/RAILWAY_DEPLOYMENT_GUIDE.md`
+- `README_AGENTS.md` → `docs/README_AGENTS.md`
+
+**AGENT RESPONSIBILITY:**
+- Read this entire file before starting work
+- Update this file with any new findings or fixes
+- Include date stamps for all major changes
+- Never create standalone documentation files
+
+---
+
+*Last updated: July 3, 2025 - Data Contamination Fix Completed & Merged*
+*Documentation Consolidated: July 3, 2025*
 *Current Focus: Threshold Integrity and Statistics Accuracy*
 
 ## Overview
