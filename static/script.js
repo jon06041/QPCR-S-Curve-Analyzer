@@ -2743,10 +2743,8 @@ async function displayMultiFluorophoreResults(results) {
             window.currentAnalysisResults = currentAnalysisResults.individual_results;
             console.log('🔍 PATHOGEN GRIDS - Set global currentAnalysisResults from individual_results:', Object.keys(currentAnalysisResults.individual_results).length, 'wells');
             
-            // Apply control validation for loaded sessions
-            const controlIssues = validateControls(currentAnalysisResults.individual_results);
-            displayControlValidationAlerts(controlIssues);
-            console.log('🔍 CONTROL VALIDATION - Applied to loaded session, found', controlIssues.length, 'issues');
+            // Control validation already handled above - no need to call again here
+            console.log('🔍 CONTROL VALIDATION - Already applied above, skipping duplicate call');
             
             const testCode = extractTestCode(getCurrentFullPattern());
             
