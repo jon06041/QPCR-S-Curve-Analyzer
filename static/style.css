@@ -3152,3 +3152,61 @@ tr:hover::before {
     justify-content: center;
     font-size: 12px;
 }
+
+/* Emergency Reset Button Styles */
+.emergency-reset-btn {
+    background: #e74c3c !important;
+    color: white !important;
+    border: none !important;
+    padding: 8px 16px !important;
+    border-radius: 4px !important;
+    cursor: pointer !important;
+    margin-left: 20px !important;
+    font-weight: bold !important;
+    transition: all 0.2s ease !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+    position: relative !important;
+    overflow: hidden !important;
+}
+
+.emergency-reset-btn:hover {
+    background: #c0392b !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3) !important;
+}
+
+.emergency-reset-btn:active {
+    background: #a93226 !important;
+    transform: translateY(1px) !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* Click ripple effect */
+.emergency-reset-btn::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.3);
+    transform: translate(-50%, -50%);
+    transition: width 0.3s, height 0.3s;
+}
+
+.emergency-reset-btn.clicked::after {
+    width: 200px;
+    height: 200px;
+}
+
+/* Success flash animation for when reset completes */
+@keyframes resetSuccess {
+    0% { background: #a93226; }
+    50% { background: #27ae60; }
+    100% { background: #e74c3c; }
+}
+
+.emergency-reset-btn.reset-complete {
+    animation: resetSuccess 1s ease-in-out;
+}

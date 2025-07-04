@@ -1,6 +1,20 @@
 # qPCR S-Curve Analyzer
 
+🚨 **FOR AGENTS: READ `Agent_instructions.md` FIRST** 🚨
+
 A web-based qPCR (quantitative Polymerase Chain Reaction) S-Curve analyzer that processes CFX Manager CSV files and performs sophisticated sigmoid curve fitting to identify quality amplification patterns.
+
+## 🤖 AGENT ONBOARDING - MANDATORY READING
+
+**ALL NEW AGENTS MUST START HERE:**
+1. 📖 **READ FIRST**: [`Agent_instructions.md`](./Agent_instructions.md) - Contains ALL critical project information
+2. 🛡️ **Understand**: Data contamination prevention system (CRITICAL)
+3. ✅ **Check**: Current status, recent fixes, and testing requirements
+4. 🔄 **Follow**: Documentation policy and safety procedures
+
+**QUICK ONBOARDING**: Run `./agent_onboarding.sh` for guided setup
+
+⚠️ **CRITICAL**: This project has a sophisticated contamination prevention system. Never bypass safety functions!
 
 ## Features
 

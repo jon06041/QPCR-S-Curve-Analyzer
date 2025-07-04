@@ -1,0 +1,25 @@
+{
+  "workbench.startupEditor": "readme",
+  "workbench.tips.enabled": true,
+  "workbench.welcomePage.walkthroughs.openOnInstall": false,
+  "files.defaultLanguage": "markdown",
+  "explorer.sortOrder": "type",
+  "explorer.fileNesting.enabled": true,
+  "explorer.fileNesting.patterns": {
+    "Agent_instructions.md": ".agent_setup.md, agent_onboarding.sh",
+    "README.md": "README_*.md, replit.md"
+  },
+  "files.associations": {
+    "Agent_instructions.md": "markdown",
+    ".agent_setup.md": "markdown"
+  },
+  "workbench.colorCustomizations": {
+    "activityBar.background": "#ff6b35",
+    "activityBar.foreground": "#ffffff",
+    "statusBar.background": "#ff6b35",
+    "statusBar.foreground": "#ffffff",
+    "titleBar.activeBackground": "#ff6b35",
+    "titleBar.activeForeground": "#ffffff"
+  },
+  "window.title": "🚨 QPCR Analyzer - READ Agent_instructions.md FIRST 🚨"
+}
