@@ -21,5 +21,16 @@
     "titleBar.activeBackground": "#ff6b35",
     "titleBar.activeForeground": "#ffffff"
   },
-  "window.title": "🚨 QPCR Analyzer - READ Agent_instructions.md FIRST 🚨"
+  "window.title": "🚨 QPCR Analyzer - READ Agent_instructions.md FIRST 🚨",
+  "terminal.integrated.shellIntegration.enabled": true,
+  "terminal.integrated.profiles.linux": {
+    "qpcr-agent-shell": {
+      "path": "/bin/bash",
+      "args": [
+        "-c",
+        "source /workspaces/QPCR-S-Curve-Analyzer/auto_agent_startup.sh && exec bash"
+      ]
+    }
+  },
+  "terminal.integrated.defaultProfile.linux": "qpcr-agent-shell"
 }
