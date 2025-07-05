@@ -246,26 +246,38 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             test_code = base_pattern.split('_')[0]
             if test_code.startswith('Ac'):
                 test_code = test_code[2:]  # Remove "Ac" prefix
-            
+
             print(f"DEBUG: Test code extraction - filename: {filename}, base_pattern: {base_pattern}, test_code: {test_code}")
-            
+
             # Use centralized pathogen mapping
             pathogen_target = get_pathogen_target(test_code, fluorophore)
-            
+
             print(f"Backend pathogen mapping: {test_code} + {fluorophore} -> {pathogen_target}")
-            
+
             # Calculate positive percentage for this channel
             pos_count = 0
             total_count = len(individual_results)
-            
+            import json
             if isinstance(individual_results, dict):
                 for well_data in individual_results.values():
-                    if isinstance(well_data, dict) and well_data.get('amplitude', 0) > 500:
-                        pos_count += 1
-            
+                    if isinstance(well_data, dict):
+                        amplitude = well_data.get('amplitude', 0)
+                        anomalies = well_data.get('anomalies', [])
+                        # Robustly handle anomalies as list, string, or None
+                        if isinstance(anomalies, str):
+                            try:
+                                anomalies = json.loads(anomalies)
+                            except Exception:
+                                anomalies = [anomalies] if anomalies else []
+                        if anomalies in ([], None, ['None']):
+                            has_anomalies = False
+                        else:
+                            has_anomalies = True
+                        if amplitude > 500 and not has_anomalies:
+                            pos_count += 1
             positive_percentage = (pos_count / total_count * 100) if total_count > 0 else 0
             pathogen_breakdown_display = f"{pathogen_target}: {positive_percentage:.1f}%"
-            
+
             print(f"Individual channel pathogen breakdown: {pathogen_breakdown_display} (fluorophore: {fluorophore}, target: {pathogen_target})")
         else:
             print(f"No fluorophore detected for individual channel session: {filename}")
@@ -406,7 +418,7 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                 well_count += 1
                 if well_count % 50 == 0:
                     db.session.commit()
-                print(f"[DB DEBUG] Saved well {well_key}: {well_result.to_dict()}")
+                # print(f"[DB DEBUG] Saved well {well_key}: {well_result.to_dict()}")
             except Exception as e:
                 print(f"Error saving well {well_key}: {e}")
                 continue
@@ -1025,7 +1037,7 @@ def save_combined_session():
                 well_result.baseline = float(well_data.get('baseline', 0)) if well_data.get('baseline') is not None else None
                 well_result.data_points = int(well_data.get('data_points', 0)) if well_data.get('data_points') is not None else None
                 well_result.cycle_range = float(well_data.get('cycle_range', 0)) if well_data.get('cycle_range') is not None else None
-                
+
                 # JSON/text fields - ensure they are converted to JSON strings for database storage
                 well_result.fit_parameters = safe_json_dumps(well_data.get('fit_parameters'), [])
                 well_result.parameter_errors = safe_json_dumps(well_data.get('parameter_errors'), [])
@@ -1033,24 +1045,37 @@ def save_combined_session():
                 well_result.anomalies = safe_json_dumps(well_data.get('anomalies'), [])
                 well_result.raw_cycles = safe_json_dumps(well_data.get('raw_cycles'), [])
                 well_result.raw_rfu = safe_json_dumps(well_data.get('raw_rfu'), [])
-                
+
                 well_result.sample_name = str(well_data.get('sample_name', '')) if well_data.get('sample_name') else None
                 well_result.cq_value = float(well_data.get('cq_value', 0)) if well_data.get('cq_value') is not None else None
                 well_result.fluorophore = str(well_data.get('fluorophore', '')) if well_data.get('fluorophore') else None
-                
-                # Set threshold_value if present
-                threshold_value = well_data.get('threshold_value')
-                if threshold_value is not None:
-                    try:
-                        well_result.threshold_value = float(threshold_value)
-                    except (ValueError, TypeError):
-                        well_result.threshold_value = None
-                else:
-                    well_result.threshold_value = None
+
+                # Debug fluorophore assignment for control wells
+                if well_result.sample_name and any(control in well_result.sample_name.upper() for control in ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC']):
+                    print(f"[CONTROL FLUOR] {well_key}: sample='{well_result.sample_name}', fluorophore='{well_result.fluorophore}'")
+
+                # --- threshold_value is not set per well in combined session ---
+                # threshold_value = well_data.get('threshold_value')
+                # print(f"[COMBINED SAVE] Well {well_key}: threshold_value raw = {threshold_value}")
+                # if threshold_value is not None:
+                #     try:
+                #         well_result.threshold_value = float(threshold_value)
+                #         print(f"[COMBINED SAVE] Well {well_key}: threshold_value processed = {well_result.threshold_value}")
+                #     except (ValueError, TypeError):
+                #         well_result.threshold_value = None
+                #         print(f"[COMBINED SAVE] Well {well_key}: threshold_value could not be converted, set to None")
+                # else:
+                #     well_result.threshold_value = None
+                #     print(f"[COMBINED SAVE] Well {well_key}: threshold_value is None")
+
                 db.session.add(well_result)
+                print(f"[COMBINED SAVE] Added well {well_key} to session {session.id}")
+                db.session.flush()  # Force write to DB after each well
                 well_count += 1
                 if well_count % 50 == 0:
+                    print(f"[COMBINED SAVE] Committing batch at {well_count} wells...")
                     db.session.commit()
+                # print(f"[DB DEBUG] Saved well {well_key}: {well_result.to_dict()}")
             except Exception as well_error:
                 print(f"Error saving well {well_key}: {well_error}")
                 continue

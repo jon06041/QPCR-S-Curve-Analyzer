@@ -1,7 +1,11 @@
+
 """
 SQL-based data integration for qPCR analysis
-Handles fluorophore-specific sample and Cq value matching using PostgreSQL temporary tables
+Handles fluorophore-specific sample and Cq value matching using SQLite temporary tables (NOT PostgreSQL)
 """
+
+# ===QPCR-DEBUG=== Module sql_integration.py loaded (using SQLite, not PostgreSQL)
+print("\n===QPCR-DEBUG=== sql_integration.py loaded (using SQLite, not PostgreSQL)\n", flush=True)
 
 import json
 import pandas as pd
@@ -239,6 +243,6 @@ def create_multi_fluorophore_sql_analysis(all_fluorophore_data, samples_csv_data
     combined_results['total_wells'] = total_analyzed_records // len(all_fluorophore_data) if all_fluorophore_data else 0
     combined_results['success_rate'] = (total_good_curves / total_analyzed_records * 100) if total_analyzed_records > 0 else 0
     
-    print(f"Multi-fluorophore SQL analysis complete: {total_analyzed_records} records, {total_good_curves} good curves")
+    print(f"Multi-fluorophore SQL analysis complete: {total_analyzed_records} records, {total_good_curves} good curves", flush=True)
     
     return combined_results

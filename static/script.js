@@ -2502,7 +2502,15 @@ async function performAnalysis() {
 
 // Display functions
 async function displayAnalysisResults(results) {
-    console.log('Displaying analysis results:', results);
+    // --- DEBUG LOGGING ---
+    console.log('🔍 DISPLAY-DEBUG - displayAnalysisResults called:', {
+        resultsExists: !!results,
+        hasIndividualResults: !!(results && results.individual_results),
+        individualResultsType: typeof (results && results.individual_results),
+        totalWellsReceived: Object.keys((results && results.individual_results) || {}).length,
+        firstTenWellKeys: Object.keys((results && results.individual_results) || {}).slice(0, 10),
+        resultsStructure: results
+    });
     
     // Clear previous experiment data RIGHT BEFORE displaying new results
     clearPreviousExperimentData();
@@ -2642,22 +2650,14 @@ async function displayMultiFluorophoreResults(results) {
     // Clear previous experiment data RIGHT BEFORE displaying new results
     clearPreviousExperimentData();
     
-    console.log('🔍 DISPLAY-DEBUG - Displaying multi-fluorophore results:', {
+    // --- DEBUG LOGGING ---
+    console.log('🔍 DISPLAY-DEBUG - displayMultiFluorophoreResults called:', {
         resultsExists: !!results,
-        hasIndividualResults: !!(results?.individual_results),
-        individualResultsType: typeof results?.individual_results,
-        totalWellsReceived: Object.keys(results?.individual_results || {}).length,
-        fluorophoreCount: results?.fluorophore_count || 0,
-        firstTenWellKeys: Object.keys(results?.individual_results || {}).slice(0, 10),
-        fluorophoreBreakdown: (() => {
-            const wells = results?.individual_results || {};
-            const breakdown = {};
-            Object.keys(wells).forEach(wellKey => {
-                const fluorophore = wells[wellKey].fluorophore || 'Unknown';
-                breakdown[fluorophore] = (breakdown[fluorophore] || 0) + 1;
-            });
-            return breakdown;
-        })(),
+        hasIndividualResults: !!(results && results.individual_results),
+        individualResultsType: typeof (results && results.individual_results),
+        totalWellsReceived: Object.keys((results && results.individual_results) || {}).length,
+        fluorophoreCount: results && results.fluorophore_count || 0,
+        firstTenWellKeys: Object.keys((results && results.individual_results) || {}).slice(0, 10),
         resultsStructure: results
     });
     
@@ -4564,32 +4564,32 @@ async function loadAnalysisHistory() {
         const data = await response.json();
         
         if (data.sessions && data.sessions.length > 0) {
+            // --- REDUCED LOGGING: Only log session count and key info ---
+            console.log(`[HIST] Loaded ${data.sessions.length} sessions from /sessions endpoint.`);
             displayAnalysisHistory(data.sessions);
-            // Always validate channel completeness and update UI after loading history
             validateAndUpdateUI(data.sessions);
-            // --- Patch: If a session is loaded, ensure chart and selectors are initialized ---
             // Find the most recent session with individual_results
             const latestSession = data.sessions.find(s => s.individual_results && Object.keys(s.individual_results).length > 0);
             if (latestSession) {
-                // 🛡️ PROTECTED: Only auto-load if not in fresh analysis mode
                 if (!window.freshAnalysisMode) {
-                    // Always wrap as { individual_results: ... }
                     setAnalysisResults({ individual_results: latestSession.individual_results }, 'auto-history-load');
-                    // Initialize selectors and chart
                     populateWellSelector(latestSession.individual_results);
                     populateResultsTable(latestSession.individual_results);
-                    // Show first well or all curves
                     const firstWell = Object.keys(latestSession.individual_results)[0];
+                    // Log only the session id/filename and first well key
+                    const sessionLabel = latestSession.session_id || latestSession.filename || '[no id]';
+                    console.log(`[HIST] Auto-loaded session: ${sessionLabel}, first well: ${firstWell}`);
                     if (firstWell) {
                         showWellDetails(firstWell);
                     } else {
                         showAllCurves('all');
                     }
-                    // Always show all curves overlay after loading from history
                     showAllCurves('all');
                 } else {
-                    console.log('🛡️ [BLOCKED] Auto-loading of latest session blocked due to fresh analysis mode');
+                    console.log('[HIST] Auto-loading blocked: fresh analysis mode');
                 }
+            } else {
+                console.log('[HIST] No session with non-empty individual_results found.');
             }
         } else {
             // Fallback to local storage
@@ -7811,35 +7811,33 @@ function isControlSample(sampleName, testPattern) {
         console.log('🔍 CONTROL DETECTION - No sample name provided');
         return false;
     }
-    
-    console.log('🔍 CONTROL DETECTION - Checking sample:', sampleName, 'with pattern:', testPattern);
-    
-    // Check for common control patterns
-    if (sampleName.includes('NTC')) {
-        console.log('🔍 CONTROL DETECTION - Found NTC control');
+
+    const name = sampleName.toLowerCase();
+    // List of control keywords and patterns (expand as needed)
+    const controlKeywords = [
+        'ntc', 'neg', 'negative', 'control', 'blank', 'h-', 'm-', 'l-', 'h', 'm', 'l', 'pos', 'positive', 'pc', 'nuclease-free', 'water', 'no template', 'no dna', 'no rna', 'extraction control', 'ec', 'ic', 'internal control', 'qc', 'quality control'
+    ];
+
+    // Check for any keyword match (word boundary or substring)
+    for (const keyword of controlKeywords) {
+        if (name.includes(keyword)) {
+            console.log(`🔍 CONTROL DETECTION - Found control keyword: ${keyword}`);
+            return true;
+        }
+    }
+
+    // Regex for H/M/L controls at end (e.g. H-1, M-2, L-3, H, M, L)
+    if (sampleName.match(/[HML]-?\d*$/i)) {
+        console.log('🔍 CONTROL DETECTION - Found H/M/L control with dash/number pattern');
         return true;
     }
-    
-    if (sampleName.match(/[HML]-\d+$/)) {
-        console.log('🔍 CONTROL DETECTION - Found H/M/L control with dash-number pattern');
-        return true;
-    }
-    
-    if (sampleName.toLowerCase().includes('control')) {
-        console.log('🔍 CONTROL DETECTION - Found control in name');
-        return true;
-    }
-    
-    if (sampleName.toLowerCase().includes('blank')) {
-        console.log('🔍 CONTROL DETECTION - Found blank control');
-        return true;
-    }
-    
+
+    // Test pattern as prefix (e.g. AcBVAB_2578825_CFX367393_H-1)
     if (testPattern && sampleName.startsWith(testPattern)) {
         console.log('🔍 CONTROL DETECTION - Found test pattern control');
         return true;
     }
-    
+
     console.log('🔍 CONTROL DETECTION - No control pattern found');
     return false;
 }
