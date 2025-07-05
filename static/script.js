@@ -5528,6 +5528,7 @@ function calculatePositiveRate(session) {
         const sampleName = well.sample_name || '';
         if (isControlSample(sampleName, testName)) {
             return; // Skip controls
+            // TODO: Positive percentage/statistic bug is NOT yet fixed. More work is needed to ensure correct calculation and display.
         }
         
         let fluorophore = well.fluorophore;
