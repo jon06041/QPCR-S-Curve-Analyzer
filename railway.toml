@@ -2,7 +2,7 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "python3 app.py"
+startCommand = "python app.py"
 healthcheckPath = "/health"
 healthcheckTimeout = 60
 healthcheckInterval = 10
