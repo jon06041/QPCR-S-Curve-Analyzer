@@ -3,7 +3,7 @@ builder = "nixpacks"
 
 [deploy]
 startCommand = "python app.py"
-healthcheckPath = "/health"
+healthcheckPath = "/ping"
 healthcheckTimeout = 60
 healthcheckInterval = 5
 restartPolicyType = "ON_FAILURE"
