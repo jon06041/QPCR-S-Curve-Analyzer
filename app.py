@@ -1313,7 +1313,7 @@ def health_check():
     try:
         # Basic app health check
         import os
-        port = os.environ.get('PORT', '5002')
+        port = os.environ.get('PORT', '5000')
         environment = os.environ.get('FLASK_ENV', 'development')
         
         response_data = {
@@ -1341,7 +1341,7 @@ def health_check():
             'status': 'unhealthy',
             'message': 'Health check failed',
             'error': str(e),
-            'port': os.environ.get('PORT', '5002'),
+            'port': os.environ.get('PORT', '5000'),
             'environment': os.environ.get('FLASK_ENV', 'development')
         }), 503
 
@@ -1388,6 +1388,6 @@ def simple_delete_session(session_id):
 
 if __name__ == '__main__':
     # Production and development server configuration
-    port = int(os.environ.get('PORT', 5002))  # Use Railway's PORT or default to 5002 for dev
+    port = int(os.environ.get('PORT', 5000))  # Use Railway's PORT or default to 5000 for dev
     debug = os.environ.get('FLASK_ENV') != 'production'  # Disable debug in production
     app.run(host='0.0.0.0', port=port, debug=debug)

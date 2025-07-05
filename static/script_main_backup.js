@@ -1851,7 +1851,7 @@ function clearPreviousExperimentData() {
     // Clear any persisting experiment pattern displays
     const experimentPattern = document.getElementById('experimentPattern');
     if (experimentPattern) {
-        experimentPattern.textContent = '--';
+        //experimentPattern.textContent = '--';
         console.log('🧹 [CLEARING] Cleared experiment pattern display');
     }
     
@@ -1861,7 +1861,7 @@ function clearPreviousExperimentData() {
 /**
  * Clears the analysis summary section
  */
-function clearAnalysisSummary() {
+/*function clearAnalysisSummary() {
     const summaryElements = [
         'experimentName',
         'experimentPattern', // Clear experiment pattern to prevent contamination
@@ -8633,7 +8633,7 @@ function updateControlValidationDisplay(controlSets) {
         // DISABLED: Create individual pathogen control grids to prevent duplicates
         // createPathogenControlGrids(controlSets);
         console.log('🔍 CONTROL VALIDATION - Skipping pathogen control grids creation to prevent duplicates');
-    }
+    }s
 
     // Legacy control validation section (can be hidden now)
     const controlValidationSection = document.getElementById('controlValidation');

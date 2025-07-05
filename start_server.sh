@@ -14,5 +14,5 @@ python3 -c 'import numpy; print(\"NumPy version:\", numpy.__version__)' || {
 }
 
 echo 'NumPy working correctly, starting application...'
-python3 app.py
+PORT=8080 python3 app.py
 "
