@@ -5,8 +5,8 @@ import re
 import traceback
 import numpy as np
 from datetime import datetime
-# Defer qpcr_analyzer import to prevent startup blocking
-# from qpcr_analyzer import process_csv_data, validate_csv_structure
+# Import analysis functions for production
+from qpcr_analyzer import process_csv_data, validate_csv_structure
 from models import db, AnalysisSession, WellResult, ExperimentStatistics
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.exc import OperationalError, IntegrityError, DatabaseError
@@ -1316,6 +1316,7 @@ def get_experiment_statistics():
 def health_check():
     """Health check endpoint for Railway deployment"""
     try:
+        print("[HEALTH] /health endpoint called")
         import os
         port = os.environ.get('PORT', '5000')
         environment = os.environ.get('FLASK_ENV', 'development')
@@ -1334,7 +1335,6 @@ def health_check():
             response_data['database'] = 'production_mode'
             response_data['note'] = 'Database test skipped in production'
         else:
-            # Test database connection only in development
             try:
                 from sqlalchemy import text
                 result = db.session.execute(text('SELECT 1')).scalar()
@@ -1343,10 +1343,10 @@ def health_check():
             except Exception as db_error:
                 response_data['database'] = 'warning'
                 response_data['db_warning'] = str(db_error)[:200]
-        
+        print(f"[HEALTH] Response: {response_data}")
         return jsonify(response_data), 200
-        
     except Exception as e:
+        print(f"[HEALTH] Exception: {e}")
         # Always return 200 for health checks to prevent Railway restart loops
         return jsonify({
             'status': 'degraded',
