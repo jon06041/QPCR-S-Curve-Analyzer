@@ -584,6 +584,8 @@ function initializeChannelThresholds() {
  * Get the current threshold for a channel and scale (NO multiplier applied)
  */
 function getCurrentChannelThreshold(channel, scale = null) {
+    // Ensure global threshold object is always initialized
+    if (!window.stableChannelThresholds) window.stableChannelThresholds = {};
     if (!scale) scale = currentScaleMode;
     
     // Load from storage if not in memory
@@ -596,6 +598,8 @@ function getCurrentChannelThreshold(channel, scale = null) {
     }
     
     if (!window.stableChannelThresholds[channel] || !window.stableChannelThresholds[channel][scale]) {
+        // ...existing code...
+   
         console.warn(`No threshold found for ${channel} ${scale}, calculating...`);
         const baseThreshold = calculateStableChannelThreshold(channel, scale);
         if (!window.stableChannelThresholds[channel]) window.stableChannelThresholds[channel] = {};
@@ -5423,7 +5427,7 @@ function calculatePathogenBreakdownFromSessions(sessions) {
         }
         
         // Final fallback for single-channel tests based on filename
-        if ((!fluorophore || fluorophore === 'Unknown') && session.filename) {
+       /* if ((!fluorophore || fluorophore === 'Unknown') && session.filename) {
             if (session.filename.includes('AcNgon')) fluorophore = 'HEX';
             else if (session.filename.includes('AcCtrach')) fluorophore = 'FAM'; 
             else if (session.filename.includes('AcTvag')) fluorophore = 'FAM';
@@ -5432,7 +5436,7 @@ function calculatePathogenBreakdownFromSessions(sessions) {
             else if (session.filename.includes('AcUpar')) fluorophore = 'FAM';
             else if (session.filename.includes('AcUure')) fluorophore = 'FAM';
             console.log(`Filename-based fluorophore detection: ${session.filename} -> ${fluorophore}`);
-        }
+        }*/
         
         // Skip only if truly no fluorophore can be detected
         if (!fluorophore || fluorophore === 'Unknown') {
@@ -5483,7 +5487,7 @@ function calculatePositiveRate(session) {
     console.log('🔍 HISTORY DEBUG - Session well_results length:', session.well_results?.length || 0);
     
     // Debug log specific session data for Cglab
-    if (session.filename && session.filename.includes('Cglab')) {
+   /* if (session.filename && session.filename.includes('Cglab')) {
         console.log('🔍 CGLAB HISTORY DEBUG - Session details:', {
             id: session.id,
             filename: session.filename,
@@ -5492,7 +5496,7 @@ function calculatePositiveRate(session) {
             success_rate: session.success_rate,
             pathogen_breakdown: session.pathogen_breakdown
         });
-    }
+    }*/
     
     // Check if stored pathogen breakdown contains "Unknown" OR fluorophore names instead of pathogen targets
     const hasUnknown = session.pathogen_breakdown && session.pathogen_breakdown.includes('Unknown');
@@ -5588,7 +5592,7 @@ function calculatePositiveRate(session) {
         }
         
         // Final fallback for single-channel tests based on filename
-        if (fluorophore === 'Unknown' && session.filename) {
+        /*if (fluorophore === 'Unknown' && session.filename) {
             if (session.filename.includes('AcNgon')) fluorophore = 'HEX';
             else if (session.filename.includes('AcCtrach')) fluorophore = 'FAM'; 
             else if (session.filename.includes('AcTvag')) fluorophore = 'FAM';
@@ -5596,8 +5600,8 @@ function calculatePositiveRate(session) {
             else if (session.filename.includes('AcMgen')) fluorophore = 'FAM';
             else if (session.filename.includes('AcUpar')) fluorophore = 'FAM';
             else if (session.filename.includes('AcUure')) fluorophore = 'FAM';
-        }
-        
+        }*/
+
         if (!fluorophoreGroups[fluorophore]) {
             fluorophoreGroups[fluorophore] = { total: 0, positive: 0 };
         }
