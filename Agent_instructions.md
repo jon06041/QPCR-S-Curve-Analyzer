@@ -991,3 +991,48 @@ Object.keys(currentAnalysisResults.individual_results).forEach(wellKey => {
 - `static/script_hybrid.js` - Complete hybrid implementation
 - `static/script.js` - Applied hybrid (currently active)  
 - `Agent_instructions.md` - This documentation
+
+# Agent Instructions - qPCR S-Curve Analyzer
+
+## Recent Fixes and Status Updates (as of July 2025)
+
+### 1. Experiment Pattern Extraction Bug (Multi-Channel Runs)
+- **Issue:** Pattern extraction failed for multi-fluorophore (multi-channel) runs due to improper cache clearing, causing cross-contamination between experiments.
+- **Resolution:** Fixed by updating the `clearPreviousExperimentData` function in `static/script.js` to ensure all relevant UI components and global state are cleared before loading new experiment data. This prevents pattern contamination and ensures correct pattern extraction for each experiment.
+- **Restore Point:** The fix was committed and pushed to the `fix/threshold-integrity-stats` branch as a restore point.
+
+### 2. History Statistics Bug (Under Investigation)
+- **Status:** A new branch `fix/history-statistics-bug` was created and checked out to investigate and resolve issues with experiment history statistics, especially for multi-fluorophore runs.
+- **Current State:** No new code changes have been made yet on this branch. The working tree is clean and up to date.
+
+### 3. Current Project Status
+- **Experiment pattern extraction** is now working correctly for both single and multi-channel runs.
+- **History statistics bug** is under active investigation on the `fix/history-statistics-bug` branch.
+
+---
+
+## Action Items for Agents
+- **If you encounter issues with experiment pattern extraction:**
+  - Ensure you are using the latest code from the `fix/threshold-integrity-stats` branch or later.
+  - Confirm that the `clearPreviousExperimentData` function is called before displaying new results.
+- **For history statistics issues:**
+  - Work on the `fix/history-statistics-bug` branch.
+  - Document any findings and fixes in this file and in commit messages.
+
+---
+
+## Summary of Changes
+- Fixed experiment pattern extraction bug (see above).
+- Created and switched to a new branch for history statistics debugging.
+- Updated these instructions to reflect the current status and next steps.
+
+---
+
+For more details, see:
+- `static/script.js` (experiment isolation and pattern extraction logic)
+- Commit history on the relevant branches
+- Project documentation in `/docs` and root-level README files
+
+---
+
+_Last updated: July 5, 2025_

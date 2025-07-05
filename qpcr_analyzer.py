@@ -1,5 +1,7 @@
 import numpy as np
 from scipy.optimize import curve_fit
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for Railway deployment
 import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
 import pandas as pd
