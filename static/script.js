@@ -3044,9 +3044,19 @@ function handleWellChange(event) {
 function populateWellSelector(individualResults) {
     // First populate the fluorophore selector
     populateFluorophoreSelector(individualResults);
-    
-    // Then populate wells with all fluorophores initially
+
+    // Always default to 'all' fluorophores ("All Wells Overlay") on load, even for single-channel runs
+    // This ensures the user always sees the overlay option by default
     filterWellsByFluorophore('all');
+
+    // Optionally, set the well selector to 'ALL_WELLS' if present
+    const wellSelector = document.getElementById('wellSelect');
+    if (wellSelector) {
+        const allOption = Array.from(wellSelector.options).find(opt => opt.value === 'ALL_WELLS');
+        if (allOption) {
+            wellSelector.value = 'ALL_WELLS';
+        }
+    }
 }
 
 function populateResultsTable(individualResults) {
@@ -4403,6 +4413,97 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Delete all button is now handled inline in the history display
     
+    // --- Threshold Controls Wiring (CFX Manager 3.1 style) ---
+    // Elements
+    const thresholdInput = document.getElementById('thresholdInput');
+    const thresholdSlider = document.getElementById('thresholdSlider');
+    const autoThresholdBtn = document.getElementById('autoThresholdBtn');
+
+    // Store calculated threshold globally for reset
+    let calculatedThreshold = null;
+    // Use sessionStorage to optionally persist user threshold (not required, but easy to revert)
+
+    // Helper: set threshold value in both input and slider
+    function setThresholdControls(value, updateChart = true) {
+        // Always keep value as a number for consistency
+        const numValue = Number(value);
+        if (thresholdInput && thresholdInput.value != numValue) thresholdInput.value = numValue;
+        if (thresholdSlider && Number(thresholdSlider.value) !== numValue) thresholdSlider.value = numValue;
+        if (updateChart) updateChartThreshold(numValue);
+    }
+
+    // Helper: update chart threshold line (assumes global chart update function exists)
+    function updateChartThreshold(value) {
+        // If you use Chart.js annotation plugin, update the threshold annotation here
+        if (window.currentChart && window.currentChart.options && window.currentChart.options.plugins && window.currentChart.options.plugins.annotation) {
+            if (window.currentChart.options.plugins.annotation.annotations && window.currentChart.options.plugins.annotation.annotations.thresholdLine) {
+                window.currentChart.options.plugins.annotation.annotations.thresholdLine.yMin = value;
+                window.currentChart.options.plugins.annotation.annotations.thresholdLine.yMax = value;
+                window.currentChart.update('none');
+            }
+        }
+        // If you use a custom threshold line, update it here as well
+        if (typeof window.setCustomThresholdLine === 'function') {
+            window.setCustomThresholdLine(value);
+        }
+    }
+
+    // On slider change: update input and chart
+    // --- Manual Lever (slider) controls threshold and input ---
+    if (thresholdSlider) {
+        thresholdSlider.addEventListener('input', function(e) {
+            setThresholdControls(e.target.value);
+        });
+        // Optionally, also allow 'change' event for keyboard/stepper
+        thresholdSlider.addEventListener('change', function(e) {
+            setThresholdControls(e.target.value);
+        });
+    }
+
+    // On input change: update slider and chart
+    // When user types a number and presses Enter or blurs, update slider and chart
+    if (thresholdInput) {
+        thresholdInput.addEventListener('change', function(e) {
+            setThresholdControls(e.target.value);
+        });
+        // Optionally, update on Enter key
+        thresholdInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                setThresholdControls(e.target.value);
+            }
+        });
+    }
+
+    // On auto-calculate button: reset to calculated threshold
+    if (autoThresholdBtn) {
+        autoThresholdBtn.addEventListener('click', function() {
+            if (calculatedThreshold !== null) {
+                setThresholdControls(calculatedThreshold);
+            }
+        });
+    }
+
+    // --- End Manual Lever/Threshold Controls ---
+
+    // On page load: set controls to calculated threshold
+    function initializeThresholdControls() {
+        // Find the calculated threshold from global state or chart config
+        let initial = null;
+        if (window.currentChart && window.currentChart.options && window.currentChart.options.plugins && window.currentChart.options.plugins.annotation) {
+            const ann = window.currentChart.options.plugins.annotation.annotations;
+            if (ann && ann.thresholdLine && typeof ann.thresholdLine.yMin !== 'undefined') {
+                initial = ann.thresholdLine.yMin;
+            }
+        }
+        // Fallback: use a default value if not found
+        if (initial === null) initial = 200; // Default threshold if not set
+        calculatedThreshold = initial;
+        setThresholdControls(initial, false);
+    }
+    initializeThresholdControls();
+
+    // --- End Threshold Controls Wiring ---
+
     // Load analysis history on page load
     loadAnalysisHistory();
 });

@@ -103,41 +103,46 @@
             </div>
 
             <div class="chart-post-controls">
-                <div class="chart-controls-content">
-                    <!-- All controls in single row below chart -->
-                    <div class="controls-row-1">
-                        <div class="scale-mode">
-                            <label for="scaleToggle">Y-Axis:</label>
-                            <button class="toggle-btn" id="scaleToggle" data-scale="linear">
-                                <span class="toggle-option active">Linear</span>
-                                <span class="toggle-option">Log</span>
-                            </button>
-                        </div>
-                        <div class="scale-presets" id="scalePresetsContainer">
-                            <label>Threshold:</label>
-                            <div class="preset-buttons">
-                                <button class="preset-btn" data-value="0.5" data-desc="Conservative">0.5x</button>
-                                <button class="preset-btn" data-value="1.0" data-desc="Standard" class="active">1.0x</button>
-                                <button class="preset-btn" data-value="2.0" data-desc="Strict">2.0x</button>
-                                <button class="preset-btn" data-value="5.0" data-desc="Very Strict">5.0x</button>
-                            </div>
-                        </div>
-                        <div class="scale-range" id="scaleRangeContainer">
-                            <label for="scaleRangeSlider"><span id="scaleRangeLabel">Scale:</span></label>
-                            <div class="slider-container">
-                                <input type="range" id="scaleRangeSlider" min="0.1" max="100" value="10" step="0.1" class="scale-slider">
-                                <span class="slider-value" id="scaleMultiplier">1.0x</span>
-                            </div>
-                        </div>
-                        <div class="baseline-flattening" id="baselineFlatteningContainer">
-                            <label for="baselineToggle">Baseline:</label>
-                            <button class="toggle-btn" id="baselineToggle" data-enabled="false" title="CFX Manager 3.1 style: Flatten non-S-curves only, preserve positive amplification">
-                                <span class="toggle-option active">Off</span>
-                                <span class="toggle-option">ON</span>
-                            </button>
+            <div class="chart-controls-content">
+                <!-- All controls in single row below chart -->
+                <div class="controls-row-1">
+                    <div class="scale-mode">
+                        <label for="scaleToggle">Y-Axis:</label>
+                        <button class="toggle-btn" id="scaleToggle" data-scale="linear">
+                            <span class="toggle-option active">Linear</span>
+                            <span class="toggle-option">Log</span>
+                        </button>
+                    </div>
+                    <div class="threshold-manual" id="thresholdManualContainer" style="display: flex; align-items: center; gap: 6px; margin-right: 10px;">
+                        <label for="thresholdInput" style="margin-bottom:0;">Threshold:</label>
+                        <input type="number" id="thresholdInput" min="0" step="0.1" style="width: 70px;" title="Set threshold value directly">
+                        <button id="autoThresholdBtn" title="Auto-calculate threshold" style="padding: 2px 8px; font-size: 13px;">Auto</button>
+                    </div>
+                    <div class="scale-presets" id="scalePresetsContainer">
+                        <label>Presets:</label>
+                        <div class="preset-buttons">
+                            <button class="preset-btn" data-value="0.5" data-desc="Conservative">0.5x</button>
+                            <button class="preset-btn" data-value="1.0" data-desc="Standard" class="active">1.0x</button>
+                            <button class="preset-btn" data-value="2.0" data-desc="Strict">2.0x</button>
+                            <button class="preset-btn" data-value="5.0" data-desc="Very Strict">5.0x</button>
                         </div>
                     </div>
+                    <div class="scale-range" id="scaleRangeContainer">
+                        <label for="scaleRangeSlider"><span id="scaleRangeLabel">Linear range:</span></label>
+                        <div class="slider-container">
+                            <input type="range" id="scaleRangeSlider" min="0.1" max="100" value="10" step="0.1" class="scale-slider">
+                            <span class="slider-value" id="scaleMultiplier">1.0x</span>
+                        </div>
+                    </div>
+                    <div class="baseline-flattening" id="baselineFlatteningContainer">
+                        <label for="baselineToggle">Baseline:</label>
+                        <button class="toggle-btn" id="baselineToggle" data-enabled="false" title="CFX Manager 3.1 style: Flatten non-S-curves only, preserve positive amplification">
+                            <span class="toggle-option active">Off</span>
+                            <span class="toggle-option">ON</span>
+                        </button>
+                    </div>
                 </div>
+            </div>
             </div>
 
             <div class="results-sections-container">
