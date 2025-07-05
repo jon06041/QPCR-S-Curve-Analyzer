@@ -923,116 +923,30 @@ From analysis, the JavaScript expects these CSS classes:
 - ✅ All HTML/CSS/JS changes committed and pushed
 - 🔄 **NEXT**: Address multi-view consistency (Show All Wells, POS, NEG, REDO) and per-channel threshold management
 
-## CURRENT SESSION PROGRESS (July 1, 2025 - Final Documentation)
-
-### 🚨 IMMEDIATE ISSUE: JavaScript Syntax Error + Threshold System
-**Problem 1**: Script.js has unclosed brace causing syntax error (line ~1604)
-**Problem 2**: User reports no threshold lines visible on charts
-**Problem 3**: Channel information needs to be passed as objects with fluorophore property
-**Status**: Partially implemented, CRITICAL fixes needed
-
-#### Investigation Findings:
-1. **Syntax Error**: MUST FIX FIRST - Script won't load due to unclosed brace
-2. **Backend Mismatch**: User running static server (port 8000) but JS calls Flask backend (port 5002)
-3. **Mock Backend Added**: Added `createMockAnalysisResponse()` for testing without Flask  
-4. **Channel Structure Issue**: Channels passed as strings instead of objects with fluorophore property
-5. **Missing Functions**: Added `updateMultiChannelThresholds()` and `updateSingleChannelThreshold()`
-
-#### Key Code Changes Made This Session:
-```javascript
-// ADDED: Mock backend function for testing
-function createMockAnalysisResponse(fluorophore) {
-    const mockWells = {};
-    // Creates realistic mock data structure with proper fluorophore property
-}
-
-// FIXED: Channel extraction in initializeChannelThresholds()
-Object.keys(currentAnalysisResults.individual_results).forEach(wellKey => {
-    const well = currentAnalysisResults.individual_results[wellKey];
-    if (well && well.fluorophore) {
-        // Extract fluorophore from well object
-        const fluorophore = well.fluorophore;
-        // Rest of the code...
-    }
-});
-```
-## ✅ **HYBRID SOLUTION IMPLEMENTED** (July 4, 2025)
-
-### **🎯 SOLUTION OVERVIEW:**
-**Problem**: Production version had pattern recognition ✅ but experiment mixing ❌  
-**Solution**: Hybrid script with smart contamination prevention + database restoration
-
-### **🔧 IMPLEMENTATION DETAILS:**
-
-#### **Smart Contamination Prevention:**
-- ✅ **`emergencyReset()`** - Clears global state safely
-- ✅ **`smartClearForHistoryLoad()`** - DB-driven restoration  
-- ✅ **`setAnalysisResults()`** - Safe state setting
-- ✅ **`displayHistorySession()`** - Clean history viewing
-
-#### **Database-Driven Data Preservation:**
-- ✅ **Pattern Recognition**: `filename` restored from `AnalysisSession.filename`
-- ✅ **Threshold Integrity**: JSON storage `{"linear": 1500, "log": 1200}`
-- ✅ **Well Data**: All analysis results preserved in database
-- ✅ **Session Context**: Complete restoration from DB on history load
-
-#### **Key Functions Added:**
-- `restoreThresholdsFromDatabase()` - Rebuilds threshold state from DB
-- `serializeThresholdsForDatabase()` - JSON threshold storage  
-- `getCurrentThresholdForDatabase()` - Enhanced threshold access
-
-### **🧪 TESTING REQUIRED:**
-1. **Load multichannel from production** - Verify pattern recognition works
-2. **Check threshold persistence** - Values should survive clearing/reload
-3. **Verify no experiment mixing** - Fresh uploads should be isolated
-4. **Test history loading** - All data should restore from database
-
-### **📂 FILES MODIFIED:**
-- `static/script_hybrid.js` - Complete hybrid implementation
-- `static/script.js` - Applied hybrid (currently active)  
-- `Agent_instructions.md` - This documentation
-
-# Agent Instructions - qPCR S-Curve Analyzer
-
-## Recent Fixes and Status Updates (as of July 2025)
-
-### 1. Experiment Pattern Extraction Bug (Multi-Channel Runs)
-- **Issue:** Pattern extraction failed for multi-fluorophore (multi-channel) runs due to improper cache clearing, causing cross-contamination between experiments.
-- **Resolution:** Fixed by updating the `clearPreviousExperimentData` function in `static/script.js` to ensure all relevant UI components and global state are cleared before loading new experiment data. This prevents pattern contamination and ensures correct pattern extraction for each experiment.
-- **Restore Point:** The fix was committed and pushed to the `fix/threshold-integrity-stats` branch as a restore point.
-
-### 2. History Statistics Bug (Under Investigation)
-- **Status:** A new branch `fix/history-statistics-bug` was created and checked out to investigate and resolve issues with experiment history statistics, especially for multi-fluorophore runs.
-- **Current State:** No new code changes have been made yet on this branch. The working tree is clean and up to date.
-
-### 3. Current Project Status
-- **Experiment pattern extraction** is now working correctly for both single and multi-channel runs.
-- **History statistics bug** is under active investigation on the `fix/history-statistics-bug` branch.
-
 ---
 
-## Action Items for Agents
-- **If you encounter issues with experiment pattern extraction:**
-  - Ensure you are using the latest code from the `fix/threshold-integrity-stats` branch or later.
-  - Confirm that the `clearPreviousExperimentData` function is called before displaying new results.
-- **For history statistics issues:**
-  - Work on the `fix/history-statistics-bug` branch.
-  - Document any findings and fixes in this file and in commit messages.
+## (July 5, 2025) Chart Threshold & CFX Manager 3.1-Style Features
+
+### New Features Implemented:
+
+1. **Draggable Threshold Lines:**
+   - Threshold lines on the main chart are now draggable directly (using Chart.js annotation plugin).
+   - Dragging the line updates the threshold input and slider in real time.
+   - Manual changes can be made per channel and scale.
+
+2. **Auto Button & Refresh Logic:**
+   - The 'Auto' button and page refresh always restore the threshold to the original calculated value for the current channel and scale.
+   - The calculated value is based on all wells for the channel, matching CFX Manager 3.1 logic.
+
+3. **Default 'Show All Wells' View:**
+   - On both individual channel and multichannel runs, the default chart view is 'Show All Wells'.
+   - This ensures all data is visible by default for review and threshold setting.
+
+4. **Agent Guidance:**
+   - When adding or modifying threshold logic, always ensure:
+     - The draggable line, input, and slider are synchronized.
+     - The auto/refresh logic uses the original calculated value.
+     - The default view is 'Show All Wells' for all run types.
+   - See `static/script.js` for implementation details.
 
 ---
-
-## Summary of Changes
-- Fixed experiment pattern extraction bug (see above).
-- Created and switched to a new branch for history statistics debugging.
-- Updated these instructions to reflect the current status and next steps.
-
----
-
-For more details, see:
-- `static/script.js` (experiment isolation and pattern extraction logic)
-- Commit history on the relevant branches
-- Project documentation in `/docs` and root-level README files
-
----
-
-_Last updated: July 5, 2025_
