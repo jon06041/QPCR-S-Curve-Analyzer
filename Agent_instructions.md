@@ -1,3 +1,90 @@
+# Chart.js Annotation Plugin Integration Debug Log (2025-07-06)
+
+## Summary
+This document records all steps, code changes, and diagnostics performed to ensure the Chart.js annotation plugin is correctly integrated in the qPCR S-Curve Analyzer web app, with a focus on making threshold lines draggable and ensuring all chart features work as intended. This log is intended to prevent redundant troubleshooting and document what has already been attempted.
+
+## Actions Taken
+
+### 1. Plugin Reference and Registration
+- Confirmed the correct Chart.js annotation plugin UMD file is referenced in `index.html`.
+- Patched `static/script.js` to robustly register the annotation plugin before any chart is created, using a function `ensureAnnotationPluginRegistered()`.
+- Added diagnostics to log plugin registration status and errors if Chart.js or the plugin is not found on `window`.
+- Ensured plugin registration is attempted both at the top of the script and on `DOMContentLoaded` as a fallback.
+
+### 2. Chart Constructor Patch
+- Patched the Chart.js constructor to always include `options.plugins.annotation` in the config, ensuring annotation options are present for every chart.
+- Added diagnostics after chart creation to confirm annotation options are present.
+
+### 3. Draggable Threshold Lines
+- After every chart is created, patched the annotation options for all threshold lines:
+  - Set `draggable: true` and `dragAxis: 'y'` for all threshold annotations.
+  - Set `enter`/`leave` handlers to change the cursor to `ns-resize` when hovering threshold lines.
+  - Set label and style options for clarity.
+- Patched `updateAllChannelThresholds` and `enableDraggableThresholds` to include strict guard clauses for chart/plugin/data readiness.
+
+### 4. Error Handling and Diagnostics
+- Added guard clauses in all threshold/chart update functions to prevent errors or browser freezes if chart or data is missing.
+- Added diagnostics to log the presence and type of Chart.js and the annotation plugin on `window` at script load.
+- Added global error and unhandled rejection logging.
+
+### 5. UI/Workflow Safeguards
+- Patched UI event handlers and initialization to ensure features are always active after new analysis or server restart.
+- Added logic to always re-enable draggable threshold lines after any chart or threshold update.
+
+### 6. Backend/Analysis Guards
+- Added a guard in `updateAllChannelThresholds` to return early if there are no valid analysis results, preventing errors when input files are missing or invalid.
+
+## Diagnostics Observed
+- Confirmed that after analysis or loading a run, threshold lines are present and draggable in most cases.
+- Confirmed that the cursor changes to `ns-resize` when hovering threshold lines.
+- No errors observed in the console related to plugin registration or annotation options after these patches.
+
+## Next Steps (if further issues persist)
+- If draggable/cursor features still do not work in some environments:
+  - Check plugin version compatibility and script loading order in `index.html`.
+  - Consider further compatibility logic for UMD/global plugin export or fallback CSS.
+  - Review Chart.js and annotation plugin versions for known issues.
+- If all above fails, escalate with a minimal reproducible example and browser/OS details.
+
+## Do Not Repeat
+- Do **not** re-patch plugin registration or chart constructor unless Chart.js or the plugin is upgraded.
+- Do **not** add redundant event listeners or duplicate annotation logic.
+- Do **not** attempt to update threshold lines before the chart and analysis results are ready.
+
+---
+Last updated: 2025-07-06
+# Agent Instructions Update: Chart/Threshold/Annotation Safety
+
+## Chart.js/Threshold/Annotation Safety
+
+**Important:**
+
+Many chart/threshold/annotation functions (such as `updateAllChannelThresholds`, `enableDraggableThresholds`, etc.) must **not** be called until after `window.amplificationChart` is created and fully initialized. This chart is only created after the user clicks "Analyze" or loads a previous run from history.
+
+**Do not call or patch these functions on page load or DOMContentLoaded.**
+
+If you need to patch or wrap these functions for diagnostics, always check:
+
+```js
+if (!window.amplificationChart || !window.amplificationChart.options || !window.amplificationChart.options.plugins) return;
+```
+
+This prevents errors and browser freezes when the chart does not exist yet.
+
+**If you see errors like:**
+
+```
+TypeError: undefined is not an object (evaluating 'window.amplificationChart.options.plugins')
+```
+
+It means a chart function was called before the chart was created. This is not a bug in the chart logic, but a timing issue. Only call chart/threshold/annotation functions after the chart is created.
+
+**Summary:**
+- Never call chart/threshold/annotation update functions on page load.
+- Always check for chart existence before calling or patching these functions.
+- If you patch or wrap these functions for diagnostics, add a guard clause as above.
+
+---
 # Agent Instructions: Multi-Fluorophore qPCR Analysis - PATTERN RECOGNITION FIXED
 
 🚨 **AUTOMATIC AGENT ONBOARDING - READ THIS SECTION FIRST** 🚨

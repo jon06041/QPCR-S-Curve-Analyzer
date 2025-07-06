@@ -6,10 +6,19 @@
     <title>MDL PCR Analyzer - Enhanced</title>
     <!-- Chart.js v4.x (stable) -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <!-- Chart.js Annotation Plugin v4.x (compatible with Chart.js v4) -->
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.1.0/dist/chartjs-plugin-annotation.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-    <script src="/static/pathogen_library.js?v=1751381539"></script>
+    <!-- Chart.js Annotation Plugin v3.1.2 (compatible with Chart.js v4) -->
+    <script src="/static/chartjs-plugin-annotation.umd.min.js"></script>
+    <!-- Diagnostics: Check Chart.js and Annotation plugin presence before main script -->
+    <script>
+      console.log('[DIAG] Before static/script.js:', {
+        Chart: typeof window.Chart,
+        ChartAnnotation: typeof window.ChartAnnotation,
+        ChartPluginAnnotation: typeof window['chartjs-plugin-annotation'],
+        ChartPlugins: window.Chart && window.Chart.registry ? Object.keys(window.Chart.registry.plugins) : 'N/A'
+      });
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" defer></script>
+    <script src="/static/pathogen_library.js?v=1751381539" defer></script>
     <link rel="stylesheet" href="/static/style.css?v=1751381539">
 </head>
 <body>

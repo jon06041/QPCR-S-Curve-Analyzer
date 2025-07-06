@@ -1,3 +1,162 @@
+// --- Chart.js Annotation Plugin Registration (robust, before chart creation) ---
+function ensureAnnotationPluginRegistered() {
+    if (window.Chart && window['chartjs-plugin-annotation']) {
+        let alreadyRegistered = false;
+        // Chart.js v3/v4: registry.plugins.items or registry.plugins._items (UMD/minified)
+        if (Chart.registry && Chart.registry.plugins) {
+            const items = Chart.registry.plugins.items || Chart.registry.plugins._items || [];
+            alreadyRegistered = Array.isArray(items) && items.some(p => p && p.id === 'annotation');
+        } else if (Chart._plugins) {
+            // Chart.js 2.x fallback
+            alreadyRegistered = Object.values(Chart._plugins).some(p => p && p.id === 'annotation');
+        }
+        if (!alreadyRegistered) {
+            Chart.register(window['chartjs-plugin-annotation']);
+            console.log('[DIAG] Chart annotation plugin registered for Chart.js');
+        } else {
+            console.log('[DIAG] Chart annotation plugin already registered');
+        }
+    } else {
+        console.warn('[DIAG] Chart.js or annotation plugin not found on window');
+    }
+}
+
+// Call this BEFORE any chart is created
+ensureAnnotationPluginRegistered();
+
+// Patch Chart constructor to always include annotation options
+if (window.Chart) {
+    const _Chart = window.Chart;
+    window.Chart = function ChartPatched(ctx, config) {
+        // Ensure annotation plugin options exist
+        if (!config.options) config.options = {};
+        if (!config.options.plugins) config.options.plugins = {};
+        if (!config.options.plugins.annotation) config.options.plugins.annotation = { annotations: {} };
+        const chart = new _Chart(ctx, config);
+        setTimeout(() => {
+            // Diagnostics after chart creation
+            if (chart.options && chart.options.plugins && chart.options.plugins.annotation) {
+                console.log('[DIAG] Chart annotation plugin options found after chart creation');
+            } else {
+                console.warn('[DIAG] Chart annotation plugin options NOT found after chart creation');
+            }
+        }, 0);
+        // --- PATCH: Make threshold lines draggable and cursor change ---
+        // Only if annotation plugin is present and chart is a line chart
+        if (chart.options && chart.options.plugins && chart.options.plugins.annotation && chart.options.plugins.annotation.annotations) {
+            const annotations = chart.options.plugins.annotation.annotations;
+            Object.keys(annotations).forEach(key => {
+                if (annotations[key] && typeof annotations[key] === 'object') {
+                    // Enable draggable for threshold lines
+                    annotations[key].draggable = true;
+                    // Set drag axis to y (vertical only)
+                    annotations[key].dragAxis = 'y';
+                    // Set cursor to 'ns-resize' when hovering threshold lines
+                    annotations[key].label = annotations[key].label || {};
+                    annotations[key].label.display = true;
+                    annotations[key].label.content = annotations[key].label.content || 'Threshold';
+                    annotations[key].label.position = 'end';
+                    annotations[key].label.backgroundColor = 'rgba(0,0,0,0.7)';
+                    annotations[key].label.color = '#fff';
+                    annotations[key].label.font = { weight: 'bold' };
+                    annotations[key].borderDash = [6, 4];
+                    annotations[key].borderWidth = 2;
+                    annotations[key].borderColor = annotations[key].borderColor || '#e74c3c';
+                    annotations[key].enter = function(ctx) {
+                        ctx.chart.canvas.style.cursor = 'ns-resize';
+                    };
+                    annotations[key].leave = function(ctx) {
+                        ctx.chart.canvas.style.cursor = '';
+                    };
+                }
+            });
+        }
+        return chart;
+    };
+    // Copy prototype
+    window.Chart.prototype = _Chart.prototype;
+    Object.setPrototypeOf(window.Chart, _Chart);
+}
+
+// === DIAGNOSTICS FOR THRESHOLD/UI/CHART FEATURES ===
+(function diagnostics() {
+    // Check Chart.js annotation plugin registration
+    document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(() => {
+            if (window.Chart && window.Chart.registry) {
+                const plugins = window.Chart.registry.plugins ? Object.keys(window.Chart.registry.plugins) : Object.keys(window.Chart.plugins || {});
+                console.log('[DIAG] Chart.js plugins registered:', plugins);
+            } else {
+                console.warn('[DIAG] Chart.js registry not found');
+            }
+            if (window.amplificationChart) {
+                const ann = window.amplificationChart.options?.plugins?.annotation;
+                if (ann) {
+                    console.log('[DIAG] Chart annotation plugin options found:', ann);
+                } else {
+                    console.warn('[DIAG] Chart annotation plugin options NOT found');
+                }
+            } else {
+                console.warn('[DIAG] amplificationChart not found');
+            }
+        }, 1000);
+    });
+
+    // Check DOM elements
+    document.addEventListener('DOMContentLoaded', function() {
+        const ids = ['thresholdInput', 'autoThresholdBtn', 'wellSelect', 'fluorophoreSelect'];
+        ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                console.log(`[DIAG] DOM element #${id} found`);
+            } else {
+                console.warn(`[DIAG] DOM element #${id} NOT found`);
+            }
+        });
+    });
+
+    // Patch and log key function calls
+    function logWrap(fn, name) {
+        return function() {
+            console.log(`[DIAG] ${name} called`, arguments);
+            try {
+                return fn.apply(this, arguments);
+            } catch (e) {
+                console.error(`[DIAG] Error in ${name}:`, e);
+            }
+        };
+    }
+    if (typeof updateAllChannelThresholds === 'function') {
+        window.updateAllChannelThresholds = logWrap(updateAllChannelThresholds, 'updateAllChannelThresholds');
+    }
+    if (typeof updateChartThresholds === 'function') {
+        window.updateChartThresholds = logWrap(updateChartThresholds, 'updateChartThresholds');
+    }
+    if (typeof setChartMode === 'function') {
+        window.setChartMode = logWrap(setChartMode, 'setChartMode');
+    }
+    if (typeof restoreAutoThreshold === 'function') {
+        window.restoreAutoThreshold = logWrap(restoreAutoThreshold, 'restoreAutoThreshold');
+    }
+    if (typeof enableDraggableThresholds === 'function') {
+        window.enableDraggableThresholds = logWrap(enableDraggableThresholds, 'enableDraggableThresholds');
+    }
+    if (typeof defineDraggableThresholds === 'function') {
+        window.defineDraggableThresholds = logWrap(defineDraggableThresholds, 'defineDraggableThresholds');
+    }
+    if (typeof enforceShowAllWellsView === 'function') {
+        window.enforceShowAllWellsView = logWrap(enforceShowAllWellsView, 'enforceShowAllWellsView');
+    }
+    // Log errors globally
+    window.addEventListener('error', function(e) {
+        console.error('[DIAG] Global error:', e.message, e);
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+        console.error('[DIAG] Unhandled promise rejection:', e.reason);
+    });
+})();
+// === END DIAGNOSTICS ===
+
 // --- Thresholds ---
 // Store per-channel, per-scale thresholds: { [channel]: { linear: value, log: value } }
 let channelThresholds = {};
@@ -619,19 +778,28 @@ function getCurrentChannelThreshold(channel, scale = null) {
 function updateAllChannelThresholds() {
     console.log('🔍 THRESHOLD - Updating all channel thresholds');
     
-    if (!window.amplificationChart) {
-        console.warn('🔍 THRESHOLD - No chart available');
+    // Extra strict guard: do not proceed if any part of the chart config is missing
+    if (!window.amplificationChart ||
+        typeof window.amplificationChart !== 'object' ||
+        !window.amplificationChart.options ||
+        typeof window.amplificationChart.options !== 'object' ||
+        !window.amplificationChart.options.plugins ||
+        typeof window.amplificationChart.options.plugins !== 'object' ||
+        !window.amplificationChart.options.plugins.annotation ||
+        typeof window.amplificationChart.options.plugins.annotation !== 'object' ||
+        !window.amplificationChart.options.plugins.annotation.annotations ||
+        typeof window.amplificationChart.options.plugins.annotation.annotations !== 'object') {
+        console.warn('🔍 THRESHOLD - Chart or annotation plugin not ready, skipping threshold update');
         return;
     }
-    
-    // Ensure chart has annotation plugin
-    if (!window.amplificationChart.options.plugins) {
-        window.amplificationChart.options.plugins = {};
+    // Also guard: do not proceed if no valid analysis results
+    if (!window.currentAnalysisResults ||
+        !window.currentAnalysisResults.individual_results ||
+        typeof window.currentAnalysisResults.individual_results !== 'object' ||
+        Object.keys(window.currentAnalysisResults.individual_results).length === 0) {
+        console.warn('🔍 THRESHOLD - No valid analysis results found for this channel. Please check your input files.');
+        return;
     }
-    if (!window.amplificationChart.options.plugins.annotation) {
-        window.amplificationChart.options.plugins.annotation = { annotations: {} };
-    }
-    
     // Get current chart annotations
     const annotations = window.amplificationChart.options.plugins.annotation.annotations;
     
@@ -671,7 +839,6 @@ function updateAllChannelThresholds() {
         const threshold = getCurrentChannelThreshold(channel, currentScale);
         if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
             const annotationKey = `threshold_${channel}`;
-            
             annotations[annotationKey] = {
                 type: 'line',
                 yMin: threshold,
@@ -686,9 +853,27 @@ function updateAllChannelThresholds() {
                     backgroundColor: 'rgba(255,255,255,0.8)',
                     color: getChannelColor(channel),
                     font: { size: 10, weight: 'bold' }
+                },
+                draggable: true,
+                drag: { cursor: 'grab' },
+                onDragEnd: function(e) {
+                    // e: { chart, annotation, event }
+                    const newY = e?.annotation?.yMin;
+                    if (typeof newY === 'number' && !isNaN(newY)) {
+                        setChannelThreshold(channel, currentScale, newY);
+                        // Optionally update UI input if present
+                        const thresholdInput = document.getElementById('thresholdInput');
+                        if (thresholdInput && (currentFluorophore === channel || currentFluorophore === 'all')) {
+                            thresholdInput.value = newY.toFixed(2);
+                        }
+                        // Persist and update chart
+                        updateAllChannelThresholds();
+                        console.log(`🔍 DRAG-END - Threshold for ${channel} (${currentScale}) set to ${newY}`);
+                    } else {
+                        console.warn('🔍 DRAG-END - Invalid newY value:', newY);
+                    }
                 }
             };
-            
             console.log(`🔍 THRESHOLD - Added threshold for ${channel}: ${threshold.toFixed(2)}`);
         } else {
             console.warn(`🔍 THRESHOLD - Invalid threshold for ${channel}: ${threshold}`);
@@ -733,7 +918,6 @@ function updateSingleChannelThreshold(fluorophore) {
     
     if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
         const annotationKey = `threshold_${fluorophore}`;
-        
         annotations[annotationKey] = {
             type: 'line',
             yMin: threshold,
@@ -748,9 +932,24 @@ function updateSingleChannelThreshold(fluorophore) {
                 backgroundColor: 'rgba(255,255,255,0.8)',
                 color: getChannelColor(fluorophore),
                 font: { size: 10, weight: 'bold' }
+            },
+            draggable: true,
+            drag: { cursor: 'grab' },
+            onDragEnd: function(e) {
+                const newY = e?.annotation?.yMin;
+                if (typeof newY === 'number' && !isNaN(newY)) {
+                    setChannelThreshold(fluorophore, currentScaleMode, newY);
+                    const thresholdInput = document.getElementById('thresholdInput');
+                    if (thresholdInput && (currentFluorophore === fluorophore || currentFluorophore === 'all')) {
+                        thresholdInput.value = newY.toFixed(2);
+                    }
+                    updateSingleChannelThreshold(fluorophore);
+                    console.log(`🔍 DRAG-END - Threshold for ${fluorophore} (${currentScaleMode}) set to ${newY}`);
+                } else {
+                    console.warn('🔍 DRAG-END - Invalid newY value:', newY);
+                }
             }
         };
-        
         console.log(`🔍 THRESHOLD - Added threshold for ${fluorophore}: ${threshold.toFixed(2)}`);
     } else {
         console.warn(`🔍 THRESHOLD - Invalid threshold for ${fluorophore}: ${threshold}`);
@@ -777,6 +976,128 @@ function getChannelColor(channel) {
 }
 
 // ...existing code...
+
+// === CFX MANAGER 3.1-STYLE THRESHOLD FEATURES ===
+// --- Draggable Threshold Lines (Chart.js Annotation Plugin) ---
+function enableDraggableThresholds() {
+    // Extra strict guard: do not proceed if any part of the chart config is missing
+    if (!window.amplificationChart ||
+        typeof window.amplificationChart !== 'object' ||
+        !window.amplificationChart.options ||
+        typeof window.amplificationChart.options !== 'object' ||
+        !window.amplificationChart.options.plugins ||
+        typeof window.amplificationChart.options.plugins !== 'object' ||
+        !window.amplificationChart.options.plugins.annotation ||
+        typeof window.amplificationChart.options.plugins.annotation !== 'object' ||
+        !window.amplificationChart.options.plugins.annotation.annotations ||
+        typeof window.amplificationChart.options.plugins.annotation.annotations !== 'object') {
+        // Chart or annotation plugin not ready
+        return;
+    }
+    const annotations = window.amplificationChart.options.plugins.annotation.annotations;
+    Object.keys(annotations).forEach(key => {
+        if (key.startsWith('threshold_')) {
+            annotations[key].draggable = true;
+            // Add drag event handler if not present
+            annotations[key].onDragEnd = function(e) {
+                const channel = key.replace('threshold_', '');
+                const newY = e?.subject?.y;
+                if (channel && newY != null && !isNaN(newY)) {
+                    setChannelThreshold(channel, currentScaleMode, newY);
+                    updateAllChannelThresholds();
+                }
+            };
+        }
+    });
+    window.amplificationChart.update('none');
+}
+
+// Patch updateAllChannelThresholds to always enable draggable lines
+const _originalUpdateAllChannelThresholds = updateAllChannelThresholds;
+updateAllChannelThresholds = function() {
+    _originalUpdateAllChannelThresholds.apply(this, arguments);
+    enableDraggableThresholds();
+};
+
+// --- Auto Button Logic ---
+function restoreAutoThreshold(channel) {
+    if (!channel) return;
+    const scale = currentScaleMode;
+    const autoValue = calculateStableChannelThreshold(channel, scale);
+    setChannelThreshold(channel, scale, autoValue);
+    updateAllChannelThresholds();
+    // Update threshold input/slider if present
+    const thresholdInput = document.getElementById('thresholdInput');
+    if (thresholdInput) thresholdInput.value = autoValue.toFixed(2);
+}
+
+// Attach Auto button event
+function attachAutoButtonHandler() {
+    const autoBtn = document.getElementById('autoThresholdBtn');
+    if (autoBtn) {
+        autoBtn.onclick = function() {
+            // Get current channel from chart or UI
+            let channel = currentFluorophore;
+            if (!channel || channel === 'all') {
+                // Try to extract from chart
+                const datasets = window.amplificationChart?.data?.datasets;
+                if (datasets && datasets.length > 0) {
+                    const match = datasets[0].label?.match(/\(([^)]+)\)/);
+                    if (match && match[1] !== 'Unknown') channel = match[1];
+                }
+            }
+            restoreAutoThreshold(channel);
+        };
+    }
+}
+
+document.addEventListener('DOMContentLoaded', attachAutoButtonHandler);
+
+// --- Restore Thresholds on Refresh ---
+document.addEventListener('DOMContentLoaded', function() {
+    // Restore all thresholds from calculated values
+    if (window.stableChannelThresholds) {
+        Object.keys(window.stableChannelThresholds).forEach(channel => {
+            ['linear', 'log'].forEach(scale => {
+                const autoValue = calculateStableChannelThreshold(channel, scale);
+                setChannelThreshold(channel, scale, autoValue);
+            });
+        });
+        updateAllChannelThresholds();
+    }
+});
+
+// --- Default to Show All Wells ---
+document.addEventListener('DOMContentLoaded', function() {
+    // Force chart mode to 'all' on load
+    if (typeof setChartMode === 'function') {
+        setChartMode('all');
+    } else {
+        window.currentChartMode = 'all';
+    }
+    // If there is a well selector, set to 'all'
+    const wellSelect = document.getElementById('wellSelect');
+    if (wellSelect) wellSelect.value = 'all';
+    // If there is a fluorophore selector, set to 'all'
+    const fluorophoreSelect = document.getElementById('fluorophoreSelect');
+    if (fluorophoreSelect) fluorophoreSelect.value = 'all';
+});
+
+// Patch chart update functions to always re-enable features
+const _originalUpdateChartThresholds = updateChartThresholds;
+updateChartThresholds = function() {
+    _originalUpdateChartThresholds.apply(this, arguments);
+    enableDraggableThresholds();
+};
+
+// Ensure features are always active after new analysis or server restart
+function ensureThresholdFeaturesActive() {
+    updateAllChannelThresholds();
+    enableDraggableThresholds();
+    attachAutoButtonHandler();
+}
+
+document.addEventListener('DOMContentLoaded', ensureThresholdFeaturesActive);
 
 // --- UI Elements ---
 const scaleToggleBtn = document.getElementById('scaleToggle');
@@ -1603,83 +1924,13 @@ async function fetchWithRetry(url, options, maxRetries = 2) {
 }
 
 // --- Enhanced Chart.js annotation plugin registration ---
-function registerChartAnnotationPlugin() {
-    if (!window.Chart || !window.Chart.register) {
-        console.warn('[Chart.js] Chart.js not loaded yet, retrying in 100ms...');
-        setTimeout(registerChartAnnotationPlugin, 100);
-        return;
-    }
-    
-    // Try multiple possible global names for the annotation plugin
-    let plugin = null;
-    
-    // Check for different annotation plugin variations
-    if (window.ChartAnnotation) {
-        plugin = window.ChartAnnotation;
-        console.log('[Chart.js] Found annotation plugin as ChartAnnotation');
-    } else if (window.chartjsPluginAnnotation) {
-        plugin = window.chartjsPluginAnnotation;
-        console.log('[Chart.js] Found annotation plugin as chartjsPluginAnnotation');
-    } else if (window.annotationPlugin) {
-        plugin = window.annotationPlugin;
-        console.log('[Chart.js] Found annotation plugin as annotationPlugin');
-    } else if (window['chartjs-plugin-annotation']) {
-        plugin = window['chartjs-plugin-annotation'];
-        console.log('[Chart.js] Found annotation plugin as chartjs-plugin-annotation');
-    }
-    
-    if (plugin) {
-        try {
-            // Check if already registered
-            if (Chart.registry && Chart.registry.plugins && Chart.registry.plugins.get('annotation')) {
-                console.log('[Chart.js] Annotation plugin already registered');
-                return;
-            }
-            
-            // Register the plugin
-            Chart.register(plugin);
-            console.log('[Chart.js] Annotation plugin registered successfully!');
-            
-            // Verify registration
-            if (Chart.registry.plugins.get('annotation')) {
-                console.log('[Chart.js] Annotation plugin registration verified');
-            } else {
-                console.warn('[Chart.js] Annotation plugin registration failed verification');
-            }
-        } catch (error) {
-            console.error('[Chart.js] Error registering annotation plugin:', error);
-        }
-    } else {
-        console.warn('[Chart.js] Annotation plugin NOT found. Threshold lines will not be visible.');
-        console.log('[Chart.js] Available window objects:', Object.keys(window).filter(key => key.toLowerCase().includes('chart') || key.toLowerCase().includes('annotation')));
-        
-        // Try to load from CDN if not found
-        if (!document.querySelector('script[src*="chartjs-plugin-annotation"]')) {
-            console.log('[Chart.js] Attempting to load annotation plugin from CDN...');
-            const script = document.createElement('script');
-            script.src = 'https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js';
-            script.onload = () => {
-                console.log('[Chart.js] Annotation plugin loaded from CDN, retrying registration...');
-                setTimeout(registerChartAnnotationPlugin, 100);
-            };
-            script.onerror = () => {
-                console.error('[Chart.js] Failed to load annotation plugin from CDN');
-            };
-            document.head.appendChild(script);
-        }
-    }
-}
-
-// Register immediately and on DOM ready
-registerChartAnnotationPlugin();
-document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(registerChartAnnotationPlugin, 500);
+// --- Enhanced Chart.js annotation plugin registration ---
+// (Unified: use only ensureAnnotationPluginRegistered everywhere)
+// Remove legacy/fallback registration attempts. Always use robust function at top of file.
+// Call again on DOMContentLoaded as a fallback in case Chart.js/plugin loads late
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(ensureAnnotationPluginRegistered, 0);
 });
-
-// Also try after Chart.js is loaded
-if (window.Chart) {
-    setTimeout(registerChartAnnotationPlugin, 100);
-}
 
 // Sorting mode for wells: 'letter-number' (A1, A2...) or 'number-letter' (A1, B1...)
 let wellSortMode = 'letter-number';
