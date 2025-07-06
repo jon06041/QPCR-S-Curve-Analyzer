@@ -1,5 +1,56 @@
 # Chart.js Annotation Plugin Integration Debug Log (2025-07-06)
 
+## 📝 qPCR Analyzer: Threshold/UI/Editor Troubleshooting & Workflow (Added: July 6, 2025)
+
+### Instructions for Next Work Session
+
+#### 1. Environment & Editor Health
+- Restart your environment and VS Code/editor to clear any glitches.
+- Verify code is being saved: Use a terminal to check file contents (e.g., `cat static/script.js`) after saving in the editor.
+- If you still have issues (e.g., Cmd+S opens a dialog, Cmd+F doesn't work), try:
+  - Disabling all extensions.
+  - Resetting keybindings to default.
+  - Reinstalling VS Code if needed.
+
+#### 2. App & UI Debugging
+- Start the app fresh and open it in your browser.
+- Check the browser console for any errors or warnings.
+- Focus on one feature at a time (e.g., just the threshold line, or just the input).
+- Let the agent know the first specific thing you want working (e.g., “I want the threshold line to appear and be draggable”).
+
+#### 3. Threshold System Checklist
+- The main threshold variable is `window.initialChannelThresholds` (per-channel, per-scale).
+- All threshold-related UI and logic (Auto button, input, draggable annotation lines) should use this variable and be kept in sync.
+- If you see any underlined variables or editor warnings, check for typos or incomplete lines.
+- If the UI is not working as intended:
+  - Confirm that code changes are being saved and loaded.
+  - Use browser and editor diagnostics to identify where the sync is breaking.
+  - Work step-by-step, testing after each change.
+
+#### 4. Troubleshooting Steps
+- If the app or UI is not updating:
+  - Hard-refresh the browser (Ctrl+Shift+R).
+  - Clear browser cache if needed.
+  - Check for JavaScript errors in the browser console.
+- If code changes are not reflected:
+  - Double-check file save status in the terminal.
+  - Restart the app/server.
+
+#### 5. When Stuck
+- If you encounter a specific error, copy the error message and let the agent know.
+- If a feature is not working, describe exactly what you expect and what you see.
+
+---
+
+**Summary of Proposed Solutions:**
+- Robustly initialize and use `window.initialChannelThresholds` for all per-channel, per-scale threshold logic.
+- Keep all threshold UI elements and logic in sync with this variable.
+- Remove stray/incomplete lines and fix typos in variable names.
+- Use diagnostics and step-by-step debugging to resolve UI or feature issues.
+- Include these troubleshooting steps in your workflow for future sessions.
+
+Let the next agent know which specific feature or problem you want to tackle first, and proceed step by step!
+
 ## Summary
 This document records all steps, code changes, and diagnostics performed to ensure the Chart.js annotation plugin is correctly integrated in the qPCR S-Curve Analyzer web app, with a focus on making threshold lines draggable and ensuring all chart features work as intended. This log is intended to prevent redundant troubleshooting and document what has already been attempted.
 
